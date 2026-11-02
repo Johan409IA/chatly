@@ -4,7 +4,7 @@
 > **Plataforma:** aplicación web responsive, instalable como PWA.  
 > **Idioma de la V1:** español.
 
-Este documento reúne las 108 decisiones aceptadas durante las rondas de definición de Chatly. Cada decisión conserva su número original (Q1–Q108) para facilitar la trazabilidad. Se incluyen las reglas y consideraciones acordadas, no las alternativas descartadas.
+Este documento reúne las 112 decisiones aceptadas durante las rondas de definición de Chatly. Cada decisión conserva su número original (Q1–Q112) para facilitar la trazabilidad. Se incluyen las reglas y consideraciones acordadas, no las alternativas descartadas.
 
 Cuando una decisión inicial fue precisada o ampliada en una ronda posterior, se documenta aquí la regla final acordada. Este documento consolida el **diseño funcional**; no sustituye el posterior diseño técnico detallado, el esquema SQL, las migraciones ni los criterios de aceptación.
 
@@ -819,7 +819,35 @@ El diseño funcional está aprobado. Antes de implementar, el equipo debe produc
 7. **Roadmap:** fases, tareas, entregables y responsables para los cuatro integrantes.
 8. **Plan de demostración:** cinco cuentas de prueba, datos precargados, URL pública y guion de escenarios para demostrar mensajería, grupos y encuestas.
 
-## 13. Nota sobre el alcance de este documento
+## 13. Identidad y perfil (decisiones adicionales)
+
+### Q109 — Edad del usuario
+
+Cada usuario tendrá **fecha de nacimiento** obligatoria y una **edad** derivada de ella.
+
+**Consideraciones:** la edad no se almacena como columna; se calcula restando el año actual menos el año de nacimiento y descontando un año si el cumpleaños aún no ha ocurrido en el año en curso. Se configura y se puede editar desde el perfil. Solo se admiten usuarios de **18 a 120 años**; el registro se rechaza fuera de ese rango. La edad se muestra únicamente en el perfil, a usuarios autenticados y verificados, y nunca en los resultados de búsqueda ni en la lista de participantes de un grupo. La fecha de nacimiento exacta solo la ve su dueño.
+
+### Q110 — Género del usuario
+
+El género será obligatorio y tendrá un catálogo cerrado de dos valores: **femenino** y **masculino**.
+
+**Consideraciones:** se solicita en el registro y se puede editar desde el perfil. No existe la opción «prefiero no decir». Se muestra solo en el perfil, a usuarios autenticados y verificados, y nunca en los resultados de búsqueda ni en la lista de participantes.
+
+### Q111 — Nombre visible
+
+Cada usuario tendrá un nombre visible obligatorio, distinto del `@alias`.
+
+**Consideraciones:** admite entre **2 y 60 caracteres**, se solicita en el registro y se puede editar en cualquier momento. No es único: la diferenciación entre usuarios recae en el alias único. El nombre visible aparece en los resultados de búsqueda junto al alias y la fotografía (Q56).
+
+### Q112 — Búsqueda por alias
+
+La búsqueda por alias se disparará a partir de **2 caracteres** escritos.
+
+**Consideraciones:** no distingue mayúsculas y minúsculas y excluye al propio usuario de los resultados. Mantiene la regla de Q19: nunca se revela el correo electrónico. La búsqueda exacta por correo sigue disponible como alternativa (Q7).
+
+---
+
+## 14. Nota sobre el alcance de este documento
 
 Este archivo registra las decisiones aceptadas durante la entrevista Grill Me. No representa todavía una especificación SQL lista para ejecutar ni una garantía de que todos los detalles de implementación estén resueltos. Los campos, restricciones, políticas, flujos de error y criterios de aceptación deben concretarse en la siguiente etapa de diseño técnico.
 
