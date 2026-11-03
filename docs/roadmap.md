@@ -120,7 +120,7 @@ No se exige soportar miles de usuarios, ofrecer SLA ni operar como servicio come
 - [x] La aplicación abre localmente.
 - [x] `uv run pytest` y `uv run ruff check .` finalizan correctamente.
 - [x] No hay secretos en Git.
-- [ ] El repositorio tiene protección básica de `main` y los PR se integran a `develop`. (descartado por decisión del equipo; no se activó protección de rama ni CI/CD)
+- [x] El repositorio tiene protección básica de `main` y los PR se integran a `develop`. (protección activada: PRs obligatorios, sin push directo; admins pueden saltarla)
 
 ## Iteración 1 — Arquitectura y cimientos de backend
 
