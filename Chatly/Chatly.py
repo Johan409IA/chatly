@@ -1,7 +1,9 @@
 """Welcome to Reflex! This file outlines the steps to create a basic app."""
 
 import reflex as rx
+from fastapi import FastAPI
 
+from Chatly.backend.api.routes.health import router as health_router
 from rxconfig import config
 
 
@@ -32,5 +34,8 @@ def index() -> rx.Component:
     )
 
 
-app = rx.App()
+api_app = FastAPI(title="Chatly API")
+api_app.include_router(health_router)
+
+app = rx.App(api_transformer=api_app)
 app.add_page(index)

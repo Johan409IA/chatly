@@ -1,11 +1,6 @@
 # Chatly — Roadmap de desarrollo
 
-> **Nombre vigente:** Chatly (anteriormente ChatFusion).  
-> **Tipo de proyecto:** académico, de demostración; no comercial.  
-> **Fecha límite:** 30 de abril de 2027.  
-> **Equipo:** 4 integrantes, experiencia media en frontend y backend.  
-> **Dedicación estimada:** 7–10 horas por integrante y semana (28–40 horas de equipo).  
-> **Presupuesto:** 0 USD; se priorizan planes gratuitos.  
+> **Nombre vigente:** Chatly     
 > **Plataforma:** aplicación web responsive e instalable como PWA.  
 > **Idioma de la V1:** español.
 
@@ -34,11 +29,6 @@ No se exige soportar miles de usuarios, ofrecer SLA ni operar como servicio come
 
 ## 2. Supuestos de planificación
 
-- **Inicio planificado:** lunes 2 de noviembre de 2026.
-- **Fin:** viernes 30 de abril de 2027.
-- **Duración calendario:** aproximadamente 26 semanas.
-- **Cadencia:** una semana de preparación, doce iteraciones de dos semanas y una ventana final de cinco días.
-- **Capacidad:** 28–40 horas de equipo por semana. La planificación debe ajustarse si hay exámenes, vacaciones o semanas de menor disponibilidad.
 - **Ramas:** `main` para versiones estables, `develop` para integración y ramas `feature/*` para trabajo funcional.
 - **Base de datos:** Supabase PostgreSQL en la nube. Alembic administra el esquema propio de Chatly; no se duplicarán las migraciones de esas tablas mediante Supabase CLI.
 - **Conexión PostgreSQL:** Session Pooler de Supabase para desarrollo y Render, sujeto a validar la configuración del proyecto. La aplicación utilizará una conexión con privilegios mínimos.
@@ -101,7 +91,7 @@ No se exige soportar miles de usuarios, ofrecer SLA ni operar como servicio come
 ### Tareas
 
 - [ ] Crear el repositorio GitHub `Chatly`.
-- [ ] Definir `main`, `develop` y convención de ramas `feature/*`, `fix/*`, `chore/*`.
+- [ ] Definir `main` y `develop`.
 - [ ] Inicializar el proyecto con Python 3.13.7 y uv.
 - [ ] Inicializar Reflex con una plantilla vacía.
 - [ ] Instalar dependencias: Reflex, FastAPI (importación directa para endpoints), Pydantic, SQLAlchemy 2, Psycopg 3, Alembic, Pydantic Settings, PyJWT y herramientas de pruebas/calidad.
@@ -111,7 +101,6 @@ No se exige soportar miles de usuarios, ofrecer SLA ni operar como servicio come
 - [ ] Inicializar Alembic con plantilla asíncrona.
 - [ ] Configurar Ruff y pytest.
 - [ ] Crear una ruta de salud `/api/health`.
-- [ ] Configurar GitHub Actions para instalar con uv y ejecutar lint/tests en cada PR.
 - [ ] Crear un README con instalación, ejecución local y convenciones de colaboración.
 - [ ] Crear proyecto Supabase Cloud y registrar de forma segura URL, publishable key y datos de conexión.
 
@@ -120,12 +109,12 @@ No se exige soportar miles de usuarios, ofrecer SLA ni operar como servicio come
 - Repositorio compartido.
 - Proyecto Reflex mínimo ejecutable.
 - `pyproject.toml`, `uv.lock`, `.python-version`, `rxconfig.py` y `alembic.ini`.
-- `.env.example`, README y CI inicial.
+- `.env.example` y README.
 - Estructura de carpetas acordada.
 
 ### Criterios de salida
 
-- Los cuatro integrantes pueden ejecutar `uv sync` y `uv run reflex run`.
+- Se puede ejecutar `uv sync` y `uv run reflex run`.
 - La aplicación abre localmente.
 - `uv run pytest` y `uv run ruff check .` finalizan correctamente.
 - No hay secretos en Git.

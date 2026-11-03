@@ -10,4 +10,5 @@ config = rx.Config(
         SitemapPlugin(),
         RadixThemesPlugin()
     ],
+    frontend_packages=["@supabase/supabase-js"],
 )
