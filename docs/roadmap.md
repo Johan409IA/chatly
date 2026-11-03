@@ -90,35 +90,37 @@ No se exige soportar miles de usuarios, ofrecer SLA ni operar como servicio come
 
 ### Tareas
 
-- [ ] Crear el repositorio GitHub `Chatly`.
-- [ ] Definir `main` y `develop`.
-- [ ] Inicializar el proyecto con Python 3.13.7 y uv.
-- [ ] Inicializar Reflex con una plantilla vacía.
-- [ ] Instalar dependencias: Reflex, FastAPI (importación directa para endpoints), Pydantic, SQLAlchemy 2, Psycopg 3, Alembic, Pydantic Settings, PyJWT y herramientas de pruebas/calidad.
-- [ ] Declarar `@supabase/supabase-js` mediante la configuración de paquetes frontend de Reflex; no crear un proyecto Node independiente.
-- [ ] Crear estructura inicial de `pages`, `components`, `state`, `backend`, `tests`, `docs` y `assets`.
-- [ ] Crear `.env.example` y excluir `.env` del control de versiones.
-- [ ] Inicializar Alembic con plantilla asíncrona.
-- [ ] Configurar Ruff y pytest.
-- [ ] Crear una ruta de salud `/api/health`.
-- [ ] Crear un README con instalación, ejecución local y convenciones de colaboración.
-- [ ] Crear proyecto Supabase Cloud y registrar de forma segura URL, publishable key y datos de conexión.
+- [x] Crear el repositorio GitHub `Chatly`.
+- [x] Definir `main` y `develop`. <!-- develop creado desde main; protección de main descartada por decisión del equipo -->
+- [x] Inicializar el proyecto con Python 3.13.7 y uv.
+- [x] Inicializar Reflex con una plantilla vacía.
+- [x] Instalar dependencias: Reflex, FastAPI (importación directa para endpoints), Pydantic, SQLAlchemy 2, Psycopg 3, Alembic, Pydantic Settings, PyJWT y herramientas de pruebas/calidad.
+- [x] Declarar `@supabase/supabase-js` mediante la configuración de paquetes frontend de Reflex (`frontend_packages`); no se creó un proyecto Node independiente.
+- [x] Crear estructura inicial de `pages`, `components`, `state`, `backend`, `tests`, `docs` y `assets`.
+- [x] Crear `.env.example` y excluir `.env` del control de versiones.
+- [x] Inicializar Alembic con plantilla asíncrona.
+- [x] Configurar Ruff y pytest.
+- [x] Crear una ruta de salud `/api/health`.
+- [x] Crear un README con instalación, ejecución local y convenciones de colaboración.
+- [x] Crear proyecto Supabase Cloud y registrar de forma segura URL, publishable key y datos de conexión.
+
+> **Nota:** CI/CD en GitHub y la protección automática de `main` fueron descartadas por decisión del equipo. El resto de los criterios de salida se verificaron localmente.
 
 ### Entregables
 
-- Repositorio compartido.
-- Proyecto Reflex mínimo ejecutable.
-- `pyproject.toml`, `uv.lock`, `.python-version`, `rxconfig.py` y `alembic.ini`.
-- `.env.example` y README.
-- Estructura de carpetas acordada.
+- [x] Repositorio compartido.
+- [x] Proyecto Reflex mínimo ejecutable.
+- [x] `pyproject.toml`, `uv.lock`, `.python-version`, `rxconfig.py` y `alembic.ini`.
+- [x] `.env.example` y README.
+- [x] Estructura de carpetas acordada.
 
 ### Criterios de salida
 
-- Se puede ejecutar `uv sync` y `uv run reflex run`.
-- La aplicación abre localmente.
-- `uv run pytest` y `uv run ruff check .` finalizan correctamente.
-- No hay secretos en Git.
-- El repositorio tiene protección básica de `main` y los PR se integran a `develop`.
+- [x] Se puede ejecutar `uv sync` y `uv run reflex run`.
+- [x] La aplicación abre localmente.
+- [x] `uv run pytest` y `uv run ruff check .` finalizan correctamente.
+- [x] No hay secretos en Git.
+- [ ] El repositorio tiene protección básica de `main` y los PR se integran a `develop`. (descartado por decisión del equipo; no se activó protección de rama ni CI/CD)
 
 ## Iteración 1 — Arquitectura y cimientos de backend
 
