@@ -85,7 +85,7 @@ Chatly: app web responsive de mensajería (español) con chats privados/grupales
 ## Límites
 - ✅ Siempre: actualizar `MEMORY.md` al terminar cada tarea; verificar JWT y RLS.
 - ⚠️ Pregunta antes: dependencias nuevas, archivos nuevos, cambios en formato de datos.
-- 🚫 Nunca: secretos en Git, saltarse RLS, editar el bloque reflex managed.
+- 🚫 Nunca: secretos en Git, saltarse RLS, editar el bloque reflex managed, hacer commit y push.
 
 ## Verificación
 - `uv run pytest` y `uv run ruff check .` pasan; `uv run reflex run` abre; `/api/health` responde `{"status":"ok"}`.

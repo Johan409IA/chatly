@@ -1,5 +1,0 @@
-# Registro npm espejo: la red local bloquea registry.npmjs.org.
-# Si más adelante la red permite npmjs.org, se puede cambiar a:
-#   registry = "https://registry.npmjs.org"
-[install]
-registry = "https://registry.npmmirror.com"

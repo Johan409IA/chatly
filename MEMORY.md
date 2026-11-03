@@ -9,7 +9,7 @@ Memoria del proyecto entre sesiones de agente. Máximo ~50 líneas.
 - Proyecto Supabase Cloud ya creado (URL/keys en lugar seguro, no en el repo).
 
 ## Decisiones (y por qué)
-- Sin CI/CD en GitHub y sin protección de `main` — decisión del equipo; la verificación es local.
+- Sin CI/CD en GitHub; protección de `main` activada (PRs obligatorios, sin push directo).
 - `bunfig.toml` apunta al espejo npmmirror porque la red local bloquea `registry.npmjs.org` (TLS/403).
 - `pythonpath = ["."]` en pytest para importar el módulo `Chatly` desde tests.
 - Ruff `target-version = py312` aunque el proyecto usa Python 3.13.7.
