@@ -74,6 +74,9 @@ Chatly: app web responsive de mensajería (español) con chats privados/grupales
 
 ## Forma de trabajar
 - Planificar antes de cambios grandes; ramas `feature/*` → `develop` → `main`; migraciones y RLS revisadas por dos integrantes.
+- Al terminar cada tarea, actualizar `MEMORY.md` con estado, decisiones y errores a evitar. Mantenerlo breve (~50 líneas). Proponer mover reglas permanentes a este archivo.
+- Usar nombres en español para las tablas y campos de la base de datos, y para los modelos Pydantic y SQLAlchemy. Usar nombres en inglés para las clases de Python, funciones, variables y métodos.
+- Usar playwright cli para pruebas end-to-end (E2E) de la UI. No usar Selenium ni Cypress, cuando sea necesario.
 
 ## Memoria
 - Al empezar, lee `MEMORY.md` para conocer el estado del proyecto y las decisiones tomadas.
