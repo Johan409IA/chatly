@@ -361,6 +361,7 @@ al cerrar sesión → desuscribir todo
 
 - `backend/core/settings.py` con `pydantic-settings` y `.env` (ya existe `.env.example`).
 - Variables mínimas: `APP_ENV`, `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_JWKS_URL`, `SUPABASE_AVATARS_BUCKET`, más las de Supabase Auth para el backend, los orígenes permitidos, `TRUSTED_PROXY_HOPS` y las variables `RATE_LIMIT_*`.
+- Configuración del pool de conexiones (con defaults: 5, 10, 30 s y 1800 s) y del logging: `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT`, `DB_POOL_RECYCLE` y `LOG_LEVEL` (JSON con redacción; por defecto `INFO`).
 - La `service_role` **no** se usa en el flujo normal. Si algún proceso administrativo (seed) la necesita, va en una variable aparte y solo se ejecuta en local/scripts.
 - Sin OpenAPI/Swagger por ahora: FastAPI se configura con `docs_url=None`, `redoc_url=None` y `openapi_url=None` en todos los entornos.
 - Nunca se registran tokens, cookies, contraseñas ni correos completos en logs.
@@ -389,7 +390,33 @@ al cerrar sesión → desuscribir todo
 | Offline | Playwright o manual guiado | Cache, outbox, reconexión, idempotencia |
 | UI | pytest + smoke | Rutas protegidas, estados vacío/carga/error |
 
-La suite por defecto no depende de red: Supabase se sustituye por un Postgres local de pruebas; Realtime y Storage se prueban de forma manual/guionizada.
+La suite por defecto no depende de red: Realtime y Storage se prueban de forma manual/guionizada.
+
+### 11.1 Pruebas contra Supabase (desvío respecto al plan original)
+
+Este documento planteaba un Postgres local para las pruebas de servicios/repositorios/RLS. Se decidió **no usar Docker ni un Postgres local** y apuntar las pruebas de integración directamente al proyecto Supabase de nube (Session Pooler):
+
+- `DATABASE_URL` (rol `postgres`, con `BYPASSRLS`): solo migraciones y DDL de preparación/limpieza en pruebas.
+- `TEST_DATABASE_URL` (rol `chatly_app`, sin `BYPASSRLS`): las aserciones de RLS y de permisos, igual que la app en producción. En el Session Pooler el usuario es `rol.project_ref`.
+- Cada evento dependiente de datos vive detrás del marker `db` registrado en `pyproject.toml` (`db: pruebas que requieren Supabase`) y de la fixture `db_available` de `tests/conftest.py`, que intenta `select 1` y salta con un mensaje claro si no hay conexión o credenciales. Sin red, el resto de la suite sigue verde.
+- `conftest` además comprueba `to_regprocedure('app.current_actor_id()')`: si la migración `0001_infra` no está aplicada, el test salta pidiendo `uv run alembic upgrade head`.
+- `require_app_role()` valida que la conexión de aserciones sea `chatly_app` sin `BYPASSRLS`; si la variable no está configurada salta, y si el rol no es el esperado falla.
+- Los objetos de prueba (schema `pruebas_rls`, tabla `registros`) se crean y destruyen en cada corrida, con teardown garantizado.
+
+### 11.2 Aislamiento RLS en las pruebas
+
+`test_rls_context.py` simula peticiones autenticadas reales contra el rol de aplicación:
+
+1. La conexión administrativa crea el schema/tabla de prueba con RLS y una política de propiedad que llama a `app.current_actor_id()` directamente, y siembra filas de los actores A y B.
+2. Cada transacción simulada se abre con `TEST_DATABASE_URL` (`chatly_app`) y ejecuta `set_config('app.current_user_id', <uuid>, true)`, igual que hará `session.py` en producción.
+3. Verifica que cada actor solo ve sus filas, que puede insertar las suyas (`with check`) y que insertar para otro actor falla.
+4. Verifica que dos transacciones consecutivas con actores distintos sobre la misma conexión del pool no comparten contexto (`set_config` es local a la transacción) y que el ajuste desaparece tras commit/rollback.
+
+Nota de plataforma: `postgres` no puede otorgar `usage` del schema `auth` (es propiedad de `supabase_admin` y carece de `GRANT OPTION`). El rol `chatly_app` se prepara con `alter role chatly_app inherit;` y `grant authenticated to chatly_app;`, con lo que hereda `usage` de `auth` y `EXECUTE` de `auth.uid()`; así las políticas pueden llamar a `app.current_actor_id()`/`auth.uid()` sin helpers `SECURITY DEFINER` ni roles temporales.
+
+### 11.3 Windows y Psycopg 3
+
+Psycopg 3 async falla con el `ProactorEventLoop` por defecto de Windows. Tanto `migrations/env.py` como `tests/conftest.py` fijan `asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())` al importar; en Linux/macOS no tiene efecto.
 
 ---
 

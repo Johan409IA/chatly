@@ -2,9 +2,22 @@
 
 import reflex as rx
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 
 from Chatly.backend.api.routes.health import router as health_router
+from Chatly.backend.core.errors import (
+    DomainError,
+    domain_error_handler,
+    unhandled_exception_handler,
+    validation_exception_handler,
+)
+from Chatly.backend.core.logging import configure_logging
+from Chatly.backend.core.settings import get_settings
 from rxconfig import config
+
+# El logging JSON se configura antes de crear la app;
+# así ningún evento posterior queda sin redacción.
+configure_logging(get_settings().log_level)
 
 
 class State(rx.State):
@@ -34,8 +47,16 @@ def index() -> rx.Component:
     )
 
 
-api_app = FastAPI(title="Chatly API")
+api_app = FastAPI(
+    title="Chatly API",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 api_app.include_router(health_router)
+api_app.add_exception_handler(DomainError, domain_error_handler)
+api_app.add_exception_handler(RequestValidationError, validation_exception_handler)
+api_app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app = rx.App(api_transformer=api_app)
 app.add_page(index)
