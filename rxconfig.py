@@ -6,9 +6,6 @@ from reflex_components_radix.plugin import RadixThemesPlugin
 
 config = rx.Config(
     app_name="Chatly",
-    plugins=[
-        SitemapPlugin(),
-        RadixThemesPlugin()
-    ],
+    plugins=[SitemapPlugin(), RadixThemesPlugin()],
     frontend_packages=["@supabase/supabase-js"],
 )

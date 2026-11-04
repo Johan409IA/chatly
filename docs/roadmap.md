@@ -129,18 +129,18 @@ No se exige soportar miles de usuarios, ofrecer SLA ni operar como servicio come
 
 ### Tareas
 
-- [ ] Definir arquitectura por capas: páginas/componentes, estados Reflex, API, servicios, repositorios, modelos e integraciones.
-- [ ] Crear configuración central con Pydantic Settings.
-- [ ] Implementar engine SQLAlchemy asíncrono, pool, sesiones y manejo de transacciones.
-- [ ] Configurar Psycopg 3 y conexión Supabase Session Pooler.
-- [ ] Configurar `target_metadata` de Alembic y convenciones de nombres para constraints e índices.
-- [ ] Crear modelos base y convenciones comunes: UUID, timestamps, estado lógico y campos de auditoría técnica.
-- [ ] Diseñar y probar el mecanismo de identidad RLS para conexiones PostgreSQL directas.
-- [ ] Verificar el aislamiento de identidad entre transacciones con pool de conexiones.
-- [ ] Crear manejo centralizado de errores de API y respuestas consistentes.
-- [ ] Añadir logs de aplicación sin exponer tokens, contraseñas ni datos privados.
-- [ ] Crear pruebas de conexión, transacción, rollback y contexto RLS.
-- [ ] Elaborar primer diagrama de arquitectura y flujo de una petición.
+- [x] Definir arquitectura por capas: páginas/componentes, estados Reflex, API, servicios, repositorios, modelos e integraciones.
+- [x] Crear configuración central con Pydantic Settings.
+- [x] Implementar engine SQLAlchemy asíncrono, pool, sesiones y manejo de transacciones.
+- [x] Configurar Psycopg 3 y conexión Supabase Session Pooler.
+- [x] Configurar `target_metadata` de Alembic y convenciones de nombres para constraints e índices.
+- [x] Crear modelos base y convenciones comunes: UUID, timestamps, estado lógico y campos de auditoría técnica.
+- [x] Diseñar y probar el mecanismo de identidad RLS para conexiones PostgreSQL directas.
+- [x] Verificar el aislamiento de identidad entre transacciones con pool de conexiones.
+- [x] Crear manejo centralizado de errores de API y respuestas consistentes.
+- [x] Añadir logs de aplicación sin exponer tokens, contraseñas ni datos privados.
+- [x] Crear pruebas de conexión, transacción, rollback y contexto RLS.
+- [x] Elaborar primer diagrama de arquitectura y flujo de una petición.
 
 ### Entregables
 
