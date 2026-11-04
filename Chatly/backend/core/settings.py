@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     supabase_publishable_key: str
     supabase_jwks_url: str
     supabase_avatars_bucket: str = "avatars"
+    jwt_leeway_seconds: int = 30
 
     db_pool_size: int = 5
     db_max_overflow: int = 10
