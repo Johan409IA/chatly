@@ -221,6 +221,18 @@ El endpoint `/api/health` es público; el resto exige JWT válido. Los errores d
 - Las páginas declaran `on_load=[SessionState.guard_page]`; las rutas se marcan como protegidas en una sola lista para no olvidar ninguna.
 - Cada endpoint usa `Depends(require_verified)` salvo auth y health.
 
+### 5.5 Límites de correo y reenvío de confirmación
+
+- **Brevo (SMTP Free):** 300 envíos por día; el contador se reinicia cada día y los envíos no usados no se acumulan. Con confirmación y recuperación activas, los flujos de la demo (pocas cuentas y pruebas puntuales) quedan muy por debajo del límite; no usar Brevo para nada distinto de Auth durante la V1. Revisar los límites vigentes antes de la demo (Iteraciones 9 y 12); no se asume que la cuota seguirá igual.
+- **Supabase Auth:** mantiene límites propios sobre los endpoints de Auth (incluido el reenvío de confirmación); son complementarios a los de la aplicación y no se configuran por proyecto.
+- **Límites de la aplicación:** reenvío de verificación y recuperación de contraseña limitados a 3 solicitudes cada 15 minutos por IP + correo (contrato §14), con `429 rate_limited` y `Retry-After`.
+
+**Procedimiento de reenvío de confirmación:**
+
+1. Vía normal: la página «Confirmación pendiente» llama a `POST /api/auth/resend-verification` con el correo; responde siempre `202` sin revelar si la cuenta existe, y Supabase reenvía el correo vía Brevo.
+2. Diagnóstico manual (equipo): Supabase Dashboard → Authentication → Users → buscar el usuario → reenviar el correo de confirmación desde las acciones del usuario; si no llega, revisar la bandeja de spam y la cuota diaria de Brevo.
+3. Si Brevo alcanza el límite diario, esperar el reinicio o usar una cuenta del equipo como remitente alternativo documentada; no desactivar la confirmación obligatoria (Q15).
+
 ---
 
 ## 6. Autorización en dos barreras

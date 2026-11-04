@@ -13,6 +13,8 @@ from Chatly.backend.core.errors import (
 )
 from Chatly.backend.core.logging import configure_logging
 from Chatly.backend.core.settings import get_settings
+from Chatly.pages.auth.login import login_page
+from Chatly.state.session_state import SessionState
 from rxconfig import config
 
 # El logging JSON se configura antes de crear la app;
@@ -59,4 +61,6 @@ api_app.add_exception_handler(RequestValidationError, validation_exception_handl
 api_app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app = rx.App(api_transformer=api_app)
-app.add_page(index)
+# Página protegida: sin sesión válida, la guarda redirige a /login.
+app.add_page(index, on_load=[SessionState.guard_page])
+app.add_page(login_page, route="/login", on_load=[SessionState.redirect_if_authenticated])
