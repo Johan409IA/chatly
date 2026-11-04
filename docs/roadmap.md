@@ -164,12 +164,12 @@ No se exige soportar miles de usuarios, ofrecer SLA ni operar como servicio come
 
 ### Tareas
 
-- [ ] Configurar Supabase Auth: correo/contraseña, confirmación obligatoria y recuperación.
-- [ ] Configurar URLs de redirección de desarrollo (`localhost`) y futura demo.
-- [ ] Configurar SMTP externo en Supabase Auth y probar confirmación/recuperación con direcciones reales.
-- [ ] Revisar límites de Auth y del proveedor de correo; registrar el procedimiento de reenvío de confirmación.
-- [ ] Implementar verificación de JWT en backend mediante claves públicas/JWKS y validaciones de issuer, audience/claims, firma y expiración según configuración.
-- [ ] Implementar guardas de rutas y estado de sesión en Reflex.
+- [x] Configurar Supabase Auth: correo/contraseña, confirmación obligatoria y recuperación.
+- [x] Configurar URLs de redirección de desarrollo (`localhost`) y futura demo.
+- [ ] Configurar SMTP externo en Supabase Auth y probar confirmación/recuperación con direcciones reales. <!-- SMTP Brevo configurado; falta probar con direcciones reales -->
+- [x] Revisar límites de Auth y del proveedor de correo; registrar el procedimiento de reenvío de confirmación. <!-- architecture.md §5.5 -->
+- [x] Implementar verificación de JWT en backend mediante claves públicas/JWKS y validaciones de issuer, audience/claims, firma y expiración según configuración.
+- [x] Implementar guardas de rutas y estado de sesión en Reflex. <!-- require_verified pendiente de la tabla profiles -->
 - [ ] Crear `profiles` y `user_contacts`.
 - [ ] Implementar creación/sincronización de perfil al registrar usuario.
 - [ ] Implementar normalización del correo y búsqueda exacta sin exponerlo en resultados.

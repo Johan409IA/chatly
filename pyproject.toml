@@ -1,7 +1,7 @@
 [project]
 name = "chatly"
 version = "0.1.0"
-description = "Add your description here"
+description = "chat para grupos puedan tomar decisiones, realizar encuestas y comunicarse con colegas de trabajo de proyecto"
 readme = "README.md"
 authors = [
     { name = "Johan", email = "johan2a409@gmail.com" }
