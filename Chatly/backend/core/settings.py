@@ -26,12 +26,23 @@ class Settings(BaseSettings):
     supabase_avatars_bucket: str = "avatars"
     jwt_leeway_seconds: int = 30
 
+    # Frontend y API viven en puertos distintos en desarrollo. El navegador
+    # necesita la URL absoluta del API y CORS con credenciales.
+    frontend_url: str = "http://localhost:3000"
+    api_public_url: str = "http://localhost:8000"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
     db_pool_size: int = 5
     db_max_overflow: int = 10
     db_pool_timeout: float = 30
     db_pool_recycle: int = 1800
 
     log_level: str = "INFO"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Orígenes permitidos para el navegador (lista separada por comas)."""
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     @field_validator("database_url", "test_database_url")
     @classmethod
