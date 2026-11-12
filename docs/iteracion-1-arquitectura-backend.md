@@ -12,7 +12,7 @@ Dejar la base técnica lista antes de cualquier funcionalidad visible: configura
 
 | Tema                   | Decisión                                                                                                                                                                                |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| BD de pruebas          | **Supabase nube directo** (Session Pooler, `DATABASE_URL` del `.env`). Sin Docker. Se asume el desvío respecto a `architecture.md` §11 (que proponía un Postgres local) y se documenta. |
+| BD de pruebas          | **Supabase nube directo** (Session Pooler, `DATABASE_URL` del `.env`). Sin Docker. Se asume el desvío respecto a `architecture.md` §12.1 (pruebas contra Supabase sin PostgreSQL local) y se documenta. |
 | Nombres de campos base | Español: `id` (uuid), `creado_en`, `actualizado_en`, `eliminado_en`, `creado_por`, `actualizado_por`. Tablas y columnas en español; clases/funciones/variables en inglés.               |
 | Migración `0001_infra` | Crea schema `app` + función `app.current_actor_id()` + grants. El rol `chatly_app` (sin `BYPASSRLS`) se crea **manualmente** desde el SQL editor de Supabase.                           |
 | Dependencias           | **Ninguna nueva**: todo con stdlib + dependencias ya presentes en `pyproject.toml`.                                                                                                     |
@@ -25,7 +25,7 @@ Dejar la base técnica lista antes de cualquier funcionalidad visible: configura
     create role chatly_app login password '<secreto>';
     alter role chatly_app noinherit;
    ```
-2. `DATABASE_URL` en `.env` con el **Session Pooler** de Supabase (`...pooler.supabase.com:5432`, `?sslmode=require`) y credenciales de `chatly_app` para la app; para correr migraciones y pruebas DDL se puede usar la conexión de migraciones.
+2. `DATABASE_URL` (rol `postgres`) para migraciones/DDL y `APP_DATABASE_URL`/`TEST_DATABASE_URL` (rol `chatly_app`) para runtime y pruebas, con el **Session Pooler** de Supabase (`...pooler.supabase.com:5432`, `?sslmode=require`).
 3. Verificar atributos del rol de conexión: `select rolname, rolsuper, rolbypassrls from pg_roles where rolname in ('chatly_app','postgres');`. Ningún rol de aplicación debe tener `rolbypassrls = true`.
 4. Si al final se opta por usar el rol `postgres` para las pruebas, las tablas de prueba **deben** crearse con `FORCE ROW LEVEL SECURITY` (el propietario salta RLS si no se fuerza).
 
@@ -133,7 +133,7 @@ Dejar la base técnica lista antes de cualquier funcionalidad visible: configura
 
 ### T8 — Documentación
 
-- `docs/architecture.md`: ajustar §11 (pruebas contra Supabase nube, con la justificación y el `skip` cuando no hay red) y §9 (variables de pool/log); confirmar que el diagrama de flujo §4.2 refleja el código implementado.
+- `docs/architecture.md`: ajustar §12.1 (pruebas contra Supabase nube, con la justificación y el `skip` cuando no hay red) y §10 (variables de pool/log); confirmar que el diagrama de flujo §4.2 refleja el código implementado.
 - `.env.example`: añadir las variables nuevas con valores por defecto.
 - `MEMORY.md` al cierre: estado, decisiones (pruebas contra nube, nombres en español) y errores a evitar.
 - `roadmap.md`: Al terminar todas las tareas marcar como completado las actividades del roadmap para asegurarse de cerrarlo.

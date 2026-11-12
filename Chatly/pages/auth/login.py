@@ -11,6 +11,7 @@ import reflex as rx
 from Chatly.components.auth_shell import (
     auth_shell,
     field_error,
+    field_label,
     form_alert,
     submit_button,
 )
@@ -26,31 +27,37 @@ def login_page() -> rx.Component:
             rx.vstack(
                 form_alert(),
                 rx.vstack(
+                    field_label("Correo electrónico"),
                     rx.input(
-                        placeholder="Correo electrónico",
+                        placeholder="tu@correo.com",
                         type="email",
                         value=AuthState.email,
                         on_change=AuthState.set_email,
                         width="100%",
+                        size="3",
+                        variant="surface",
                         name="email",
                         autocomplete="email",
                     ),
                     field_error("email"),
-                    spacing="4",
+                    spacing="2",
                     width="100%",
                 ),
                 rx.vstack(
+                    field_label("Contraseña"),
                     rx.input(
-                        placeholder="Contraseña",
+                        placeholder="Tu contraseña",
                         type="password",
                         value=AuthState.password,
                         on_change=AuthState.set_password,
                         width="100%",
+                        size="3",
+                        variant="surface",
                         name="password",
                         autocomplete="current-password",
                     ),
                     field_error("password"),
-                    spacing="4",
+                    spacing="2",
                     width="100%",
                 ),
                 submit_button("Entrar"),
@@ -64,7 +71,6 @@ def login_page() -> rx.Component:
             "¿No tienes cuenta? Crear una",
             href="/register",
             size="2",
-            margin_top="1rem",
         ),
         rx.link(
             "¿Olvidaste tu contraseña?",

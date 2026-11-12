@@ -1,9 +1,9 @@
 # Chatly — Modelo de datos
 
-> **Estado:** implementadas `perfiles` y `contactos_usuario` (migración `0002_perfiles`); el resto es propuesta para revisión del equipo.
+> **Estado:** diseño cerrado; `perfiles` y `contactos_usuario` implementadas (migración `0002_perfiles`). Las migraciones `0013_descubrimiento_social` y `0014_social_cron` están pendientes de implementar y probar.
 > **Motor:** Supabase PostgreSQL (PostgreSQL 15+).
 > **Migraciones:** Alembic, plantilla asíncrona.
-> **Reglas de origen:** `docs/chatly.md` (Q1–Q108) más las decisiones nuevas Q109 y Q110 de la sección 9.
+> **Reglas de origen:** registro funcional consolidado `docs/chatly.md` (Q1–Q179). La ampliación social se implementa incrementalmente en las migraciones `0013_descubrimiento_social` y `0014_social_cron`.
 > **Alcance:** define tablas, columnas, restricciones, índices y reglas de acceso a nivel de diseño. La matriz completa de políticas se detalla en `authorization-matrix.md`.
 
 ---
@@ -49,6 +49,13 @@ erDiagram
     opciones_encuesta ||--o{ votos_encuesta : "opcion_id"
     perfiles ||--o{ votos_encuesta : "usuario_id"
     perfiles ||--o{ registros_auditoria : "actor_id"
+    perfiles ||--o{ intereses_usuario : "usuario_id"
+    categorias_interes ||--o{ intereses : "categoria_id"
+    intereses ||--o{ intereses_usuario : "interes_id"
+    intereses ||--o{ intereses_conversacion : "interes_id"
+    conversaciones ||--o{ intereses_conversacion : "conversacion_id"
+    perfiles ||--o{ solicitudes_union : "solicitante_id"
+    conversaciones ||--o{ solicitudes_union : "conversacion_id"
 ```
 
 `auth.users` es gestionado por Supabase Auth. Alembic **no** crea ni altera sus columnas; solo añade como máximo un trigger de sincronización (sección 9.1).
@@ -291,6 +298,10 @@ create index ix_conversaciones_actividad
 
 create index ix_conversaciones_creado_por on public.conversaciones (creado_por);
 create index ix_conversaciones_administrador on public.conversaciones (administrador_id);
+
+-- Necesario para la FK compuesta que impide solicitudes de unión a conversaciones directas.
+create unique index uq_conversaciones_id_tipo
+    on public.conversaciones (id, tipo);
 ```
 
 **Reglas**
@@ -701,6 +712,10 @@ Las políticas completas se documentan en `authorization-matrix.md`. Resumen por
 | `encuestas` | Miembros con periodo visible | Miembro activo; edición/cierre según Q88–Q108 |
 | `opciones_encuesta` | Igual que `encuestas` | Solo backend, validado por servicio |
 | `votos_encuesta` | Igual que `encuestas` | Miembro activo mientras la encuesta esté abierta |
+| `categorias_interes`, `intereses` | Solo backend; lectura servida por API | Solo administración del catálogo mediante migraciones/datos de aplicación |
+| `intereses_usuario` | Solo backend; nunca se consulta directamente desde el navegador | Servicio autenticado; solo modifica los intereses del actor |
+| `intereses_conversacion` | Solo backend; la API filtra por descubribilidad | Solo administrador activo del grupo a través del servicio |
+| `solicitudes_union` | Solo backend; actor solicitante o administrador del grupo según operación | Servicio; actor autenticado crea su solicitud y administrador resuelve la de su grupo |
 | `registros_auditoria` | Nadie desde la app (solo herramientas administrativas) | Solo backend, insert |
 
 - El navegador no recibe `select` sobre `perfiles` ni sobre `app.perfiles_publicos`; ambas son de uso del backend. Los datos públicos del perfil se sirven por la API y `fecha_nacimiento` solo aparece en la respuesta del perfil propio.
@@ -709,7 +724,11 @@ Las políticas completas se documentan en `authorization-matrix.md`. Resumen por
 
 ```sql
 create or replace function app.current_actor_id() returns uuid
-language sql stable as $$
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
     select coalesce(
         auth.uid(),
         nullif(current_setting('app.current_user_id', true), '')::uuid
@@ -720,9 +739,11 @@ $$;
 Reglas de operación:
 
 - El backend fija `set_config('app.current_user_id', :uid, true)` dentro de cada transacción.
+- El registro crea el usuario en Supabase Auth y fija `app.current_user_id` al id recién creado dentro de la transacción, para insertar `perfiles`, `contactos_usuario` e `intereses_usuario`. El id no proviene del cliente.
 - El rol `chatly_app` no tiene `BYPASSRLS` ni es propietario de las tablas.
-- Las políticas compartidas se declaran `TO authenticated, chatly_app` y exigen `app.current_actor_id()`; las exclusivas del backend, `TO chatly_app`. Las funciones de membresía son `security definer` para evitar la recursión de RLS (ver `authorization-matrix.md` §3.1).
-- Para tablas exclusivas del backend (`contactos_usuario`, `versiones_mensaje`, `registros_auditoria`) las políticas se declaran `TO chatly_app`.
+- Las políticas compartidas se declaran `TO authenticated, chatly_app` y exigen `app.current_actor_id()`; las exclusivas del backend, `TO chatly_app`. Las funciones de membresía y `app.current_actor_id()` son `security definer` para evitar la recursión de RLS y resolver `auth.uid()` sin heredar `authenticated` (ver `authorization-matrix.md` §3.1).
+- `chatly_app` no hereda `authenticated`: se le revoca la membresía y solo recibe los `EXECUTE` y privilegios explícitos de §9.2 de la matriz.
+- Para tablas exclusivas del backend (`contactos_usuario`, `versiones_mensaje`, `categorias_interes`, `intereses`, `intereses_usuario`, `intereses_conversacion`, `solicitudes_union`, `registros_auditoria`) las políticas se declaran `TO chatly_app`. El servicio aplica las comprobaciones de actor, visibilidad y membresía antes de devolver datos sociales.
 - Se revocan privilegios innecesarios de `anon` y `authenticated` sobre tablas que el navegador no debe tocar.
 - **Entorno de pruebas:** una base local no tiene el esquema `auth` de Supabase. Las pruebas crean un esquema mínimo `auth` con `auth.uid()` devolviendo `null`, de modo que todo el flujo dependa de `app.current_user_id` y se pueda verificar el aislamiento entre transacciones.
 
@@ -823,13 +844,18 @@ order by o.posicion;
 | `0002_perfiles` | `perfiles`, `contactos_usuario`, vista `app.perfiles_publicos`, trigger de edad, función `app.buscar_usuario_por_correo` **(aplicada)** |
 | `0003_conversaciones` | `conversaciones`, `miembros_conversacion`, `preferencias_conversacion` |
 | `0004_mensajes` | `mensajes`, `versiones_mensaje`, `reacciones_mensaje`, trigger de actividad y FK `miembros_conversacion.ultimo_mensaje_leido_id` |
-| `0005_encuestas` | `encuestas`, `opciones_encuesta`, `votos_encuesta` |
-| `0006_auditoria` | `registros_auditoria` |
-| `0007_rls` | Políticas del resto de tablas y `security_invoker` de la vista |
-| `0008_grants` | Rol `chatly_app`, privilegios mínimos, `revoke` de `anon`/`authenticated` |
-| `0009_realtime` | Publicación `supabase_realtime` y políticas de `realtime.messages` |
-| `0010_storage` | Bucket `avatars`, políticas de Storage y límites de tamaño/tipo |
-| `0011_auth_sync` | Trigger de sincronización de `correo_verificado_en` (con guardia si `auth.users` no existe) |
+| `0005_identidad_rol` | `app.current_actor_id()` `SECURITY DEFINER`, `revoke authenticated from chatly_app` y `noinherit` |
+| `0005a_alias_exists` | Función `app.alias_exists(text)` `SECURITY DEFINER` para comprobar el alias antes del registro |
+| `0005b_intereses` | Catálogo de intereses (`categorias_interes`, `intereses`), selección personal (`intereses_usuario`), `perfiles.visibilidad_publica`, `app.catalogo_intereses()` `SECURITY DEFINER`, RLS y grants **(aplicada)** |
+| `0006_encuestas` | `encuestas`, `opciones_encuesta`, `votos_encuesta` |
+| `0007_auditoria` | `registros_auditoria` |
+| `0008_rls` | Políticas del resto de tablas y `security_invoker` de la vista |
+| `0009_grants` | Rol `chatly_app`, privilegios mínimos, `revoke` de `anon`/`authenticated` |
+| `0010_realtime` | Publicación `supabase_realtime` y políticas de `realtime.messages` |
+| `0011_storage` | Bucket `avatars`, políticas de Storage y límites de tamaño/tipo |
+| `0012_auth_sync` | Trigger de sincronización de `correo_verificado_en` (con guardia si `auth.users` no existe) |
+| `0013_descubrimiento_social` | Descubribilidad y descripción de grupos, intereses de grupos (`intereses_conversacion`), solicitudes de unión, índices, reglas transaccionales, RLS y grants |
+| `0014_social_cron` | Extensión `pg_cron`, función `app.publish_social_event(...)` y programación de `app.expire_pending_join_requests()` cada 15 minutos como `chatly_app` |
 
 Cada migración incluye su prueba de `upgrade`/`downgrade` y se revisa por dos integrantes (A y B).
 
@@ -865,3 +891,313 @@ Sin pendientes sobre edad y género. Las reglas quedaron cerradas así:
 6. Búsqueda por alias: mínimo 2 caracteres y sin incluir al propio usuario.
 
 Sin pendientes funcionales sobre el perfil.
+
+
+---
+
+## 17. Ampliación del modelo para descubrimiento social (Q113–Q179)
+
+Esta sección agrega las estructuras necesarias para la funcionalidad social sin crear una entidad separada de «amistad» ni otro tipo de conversación. Los grupos descubribles siguen siendo filas de `conversaciones` con `tipo = 'group'`.
+
+> **Estrategia de migración:** las tablas `perfiles` y `conversaciones` ya forman parte de migraciones anteriores. Por eso, los nuevos campos se incorporan mediante `ALTER TABLE`; no se modifica retroactivamente el contenido de `0002_perfiles` ni `0003_conversaciones`.
+>
+> La **visibilidad pública del perfil (§17.1)** y el **catálogo y la selección de intereses (§17.2–17.3)** se aplican en `0005b_intereses`, que ya está en producción: el registro necesita el catálogo antes de que exista la funcionalidad social completa. El resto de §17 (intereses de grupos, solicitudes de unión y sus políticas) sigue en `0013_descubrimiento_social`.
+
+### 17.1 Visibilidad pública de perfiles
+
+> Aplicada en `0005b_intereses` (columna `perfiles.visibilidad_publica`, índice `ix_perfiles_visibles_descubrimiento` y vista `app.perfiles_publicos` ampliada). La interfaz para cambiarla y el resto de efectos sociales llegan con `0013_descubrimiento_social`.
+
+```sql
+alter table public.perfiles
+    add column visibilidad_publica boolean not null default true;
+
+create index ix_perfiles_visibles_descubrimiento
+    on public.perfiles (id)
+    where eliminado_en is null and visibilidad_publica = true;
+
+-- Extiende la vista existente; conserva sus columnas anteriores y añade la bandera social.
+create or replace view app.perfiles_publicos
+with (security_invoker = true) as
+select
+    p.id,
+    p.alias,
+    p.nombre_visible,
+    p.ruta_avatar,
+    date_part('year', age(current_date, p.fecha_nacimiento))::int as edad,
+    p.genero,
+    p.creado_en,
+    p.visibilidad_publica
+from public.perfiles p
+where p.eliminado_en is null;
+```
+
+Reglas:
+
+- El valor inicial es `true` (Q116).
+- `false` excluye al usuario de recomendaciones de personas y oculta sus intereses en el perfil público.
+- Nombre visible, alias y fotografía siguen disponibles mediante búsqueda directa por alias o correo (Q120, Q139).
+- La visibilidad del perfil no modifica la visibilidad de los grupos administrados (Q165).
+- El perfil propio devuelve siempre sus intereses; el perfil público solo los devuelve cuando `visibilidad_publica = true`.
+
+### 17.2 Datos de catálogo: `categorias_interes` e `intereses`
+
+> Aplicadas en `0005b_intereses`, junto con la semilla inicial del catálogo y la función `app.catalogo_intereses()` `SECURITY DEFINER` que sirve el catálogo sin sesión (el registro lo consume antes de que exista cuenta).
+
+El catálogo es administrado mediante los datos iniciales/migraciones de la aplicación. Los usuarios no crean ni editan categorías o intereses (Q149).
+
+```sql
+create table public.categorias_interes (
+    id              uuid primary key default gen_random_uuid(),
+    nombre          text        not null,
+    orden           integer     not null default 0,
+    activa           boolean     not null default true,
+    creado_en       timestamptz not null default now(),
+    actualizado_en  timestamptz not null default now(),
+
+    constraint ck_categorias_interes_nombre check (char_length(btrim(nombre)) > 0)
+);
+
+create unique index uq_categorias_interes_nombre
+    on public.categorias_interes (lower(btrim(nombre)));
+
+create table public.intereses (
+    id              uuid primary key default gen_random_uuid(),
+    categoria_id    uuid        not null references public.categorias_interes (id),
+    nombre          text        not null,
+    activo          boolean     not null default true,
+    creado_en       timestamptz not null default now(),
+    actualizado_en  timestamptz not null default now(),
+
+    constraint ck_intereses_nombre check (char_length(btrim(nombre)) > 0)
+);
+
+create unique index uq_intereses_nombre
+    on public.intereses (lower(btrim(nombre)));
+create index ix_intereses_categoria_activos
+    on public.intereses (categoria_id, nombre)
+    where activo = true;
+```
+
+Las categorías ordenan la interfaz; el usuario selecciona intereses individuales. Ejemplos iniciales: Tecnología (Programación, IA, Ciberseguridad, Desarrollo web), Negocios (Marketing, Ventas, Emprendimiento), Diseño (UI/UX, Diseño gráfico, Ilustración), Entretenimiento (Música, Cine, Videojuegos) y Deportes (Fútbol, Baloncesto, Fitness) (Q163, Q178).
+
+### 17.3 Intereses personales: `intereses_usuario`
+
+> Tabla aplicada en `0005b_intereses`. La política de lectura de intereses de terceros (perfiles públicos) no se crea todavía: depende de `app.is_verified_actor()`, que llega con `0013_descubrimiento_social`. Hoy solo existe la selección propia.
+
+```sql
+create table public.intereses_usuario (
+    usuario_id  uuid        not null references public.perfiles (id),
+    interes_id  uuid        not null references public.intereses (id),
+    creado_en   timestamptz not null default now(),
+
+    primary key (usuario_id, interes_id)
+);
+
+create index ix_intereses_usuario_interes
+    on public.intereses_usuario (interes_id, usuario_id);
+```
+
+Reglas:
+
+- Un usuario puede tener de 0 a 10 intereses. Cero es válido porque la selección es opcional durante el registro (Q117, Q124).
+- La selección se solicita durante el registro, pero se puede omitir y completar/editar después desde el perfil (Q114, Q117).
+- El límite de 10 se valida en el servicio dentro de una transacción que bloquea la fila correspondiente de `perfiles` (`SELECT ... FOR UPDATE`) antes de reemplazar la selección. No se puede expresar como un `CHECK` normal porque depende del número de filas relacionadas.
+- En el registro el límite se valida antes de crear la cuenta (`422 interest_limit_exceeded`) y la inserción ocurre en la misma transacción que el perfil, con el filtro de intereses activos en el SQL.
+- Solo se asocian intereses activos existentes en `intereses`.
+- Se registra el cambio en `registros_auditoria` (Q43).
+- Sin intereses no se recomiendan personas ni grupos automáticamente; la búsqueda manual de grupos por nombre permanece disponible (Q140).
+
+### 17.4 Intereses de grupos: `intereses_conversacion`
+
+Se reutiliza `conversaciones`; no se crea una tabla `comunidades`.
+
+```sql
+alter table public.conversaciones
+    add column descripcion text,
+    add column es_descubrible boolean not null default false;
+
+alter table public.conversaciones
+    add constraint ck_conversaciones_descubribles_solo_grupos
+    check (tipo = 'group' or (es_descubrible = false and descripcion is null));
+
+alter table public.conversaciones
+    add constraint ck_conversaciones_descripcion_publica
+    check (
+        es_descubrible = false
+        or (descripcion is not null and char_length(btrim(descripcion)) between 10 and 300)
+    );
+
+create table public.intereses_conversacion (
+    conversacion_id uuid        not null references public.conversaciones (id),
+    interes_id      uuid        not null references public.intereses (id),
+    creado_en       timestamptz not null default now(),
+
+    primary key (conversacion_id, interes_id)
+);
+
+create index ix_intereses_conversacion_interes
+    on public.intereses_conversacion (interes_id, conversacion_id);
+
+create index ix_conversaciones_descubribles
+    on public.conversaciones (id)
+    where tipo = 'group'
+      and es_descubrible = true
+      and archivada = false
+      and eliminado_en is null;
+```
+
+Reglas:
+
+- Todos los grupos se crean privados (`es_descubrible = false`) (Q131).
+- Solo el administrador activo puede publicar, volver privado, cambiar descripción o intereses (Q142).
+- Para activar la descubribilidad se exige una descripción de 10–300 caracteres y entre 1 y 5 intereses (Q121, Q134, Q167).
+- El administrador puede cambiar los intereses posteriormente manteniendo el rango 1–5 (Q174).
+- El límite de 5 intereses se valida en el servicio bloqueando la fila de `conversaciones` dentro de la transacción. Una validación de activación también comprueba que haya al menos un interés asociado.
+- `descripcion` solo es obligatoria cuando `es_descubrible = true`; un grupo privado no tiene que publicarla.
+- Los cambios de intereses afectan las recomendaciones en la próxima apertura/actualización de Descubrir (Q164, Q174).
+- Los grupos archivados no aparecen en descubrimiento.
+- Los datos públicos del grupo son nombre, descripción, intereses, cantidad de integrantes y plazas disponibles. La lista de integrantes y los mensajes nunca se exponen a usuarios externos (Q132).
+- Al desactivar descubribilidad, los integrantes actuales permanecen, pero se rechazan en la misma transacción todas las solicitudes pendientes del grupo (Q137, Q143, Q175).
+
+### 17.5 Solicitudes de unión: `solicitudes_union`
+
+La columna constante `tipo = 'group'` y la FK compuesta impiden solicitudes a conversaciones directas. Requiere el índice único `uq_conversaciones_id_tipo` de §5.
+
+```sql
+create table public.solicitudes_union (
+    id                  uuid primary key default gen_random_uuid(),
+    conversacion_id     uuid        not null,
+    tipo                text        not null default 'group',
+    solicitante_id      uuid        not null references public.perfiles (id),
+    estado              text        not null default 'pending',
+    motivo_resolucion   text,
+    creada_en           timestamptz not null default now(),
+    vence_en            timestamptz not null default (now() + interval '14 days'),
+    resuelta_en         timestamptz,
+    resuelta_por        uuid        references public.perfiles (id),
+    actualizado_en      timestamptz not null default now(),
+
+    constraint ck_solicitudes_union_solo_grupos check (tipo = 'group'),
+    constraint fk_solicitudes_union_grupo
+        foreign key (conversacion_id, tipo)
+        references public.conversaciones (id, tipo),
+    constraint ck_solicitudes_union_estado
+        check (estado in ('pending','accepted','rejected','expired')),
+    constraint ck_solicitudes_union_motivo
+        check (
+            motivo_resolucion is null
+            or motivo_resolucion in (
+                'accepted_by_admin',
+                'direct_add_same_group',
+                'rejected_by_admin',
+                'group_private',
+                'group_full',
+                'joined_other_group',
+                'expired'
+            )
+        ),
+    constraint ck_solicitudes_union_estado_resolucion
+        check (
+            (estado = 'pending' and resuelta_en is null and motivo_resolucion is null)
+            or (estado <> 'pending' and resuelta_en is not null and motivo_resolucion is not null)
+        ),
+    constraint ck_solicitudes_union_motivo_por_estado
+        check (
+            (estado = 'pending' and motivo_resolucion is null)
+            or (estado = 'accepted' and motivo_resolucion in ('accepted_by_admin','direct_add_same_group'))
+            or (estado = 'rejected' and motivo_resolucion in ('rejected_by_admin','group_private','group_full','joined_other_group'))
+            or (estado = 'expired' and motivo_resolucion = 'expired')
+        ),
+    constraint ck_solicitudes_union_vencimiento
+        check (vence_en > creada_en)
+);
+
+-- Regla global: una sola solicitud pendiente por usuario en toda la aplicación.
+create unique index uq_solicitudes_union_pendiente_usuario
+    on public.solicitudes_union (solicitante_id)
+    where estado = 'pending';
+
+-- Bandeja del administrador: solicitudes pendientes en orden de llegada.
+create index ix_solicitudes_union_pendientes_grupo
+    on public.solicitudes_union (conversacion_id, creada_en, id)
+    where estado = 'pending';
+
+create index ix_solicitudes_union_vencimiento
+    on public.solicitudes_union (vence_en)
+    where estado = 'pending';
+
+-- Consulta del periodo de espera: solo los rechazos manuales generan siete días.
+create index ix_solicitudes_union_rechazo_manual
+    on public.solicitudes_union (solicitante_id, conversacion_id, resuelta_en desc)
+    where estado = 'rejected' and motivo_resolucion = 'rejected_by_admin';
+```
+
+Reglas:
+
+- El solicitante se obtiene de la sesión autenticada; nunca de un `solicitante_id` enviado por el navegador.
+- Solo se puede solicitar un grupo activo y descubrible. No hace falta compartir intereses con el grupo (Q141).
+- El índice único parcial garantiza como máximo una solicitud pendiente global por usuario (Q151, Q159). La operación captura la violación de unicidad y devuelve `pending_join_request_exists`.
+- No hay solicitudes duplicadas pendientes para el mismo grupo; el límite global ya impide dos pendientes del mismo usuario (Q152).
+- Las solicitudes vencen a los 14 días. El job de `pg_cron` ejecuta `app.expire_pending_join_requests()`, que cambia `pending` a `expired`, establece `resuelta_en`, libera el índice parcial, escribe auditoría y publica `join_request.resolved` con `app.publish_social_event(...)` (Q160).
+- Solo el rechazo manual (`motivo_resolucion = 'rejected_by_admin'`) activa el periodo de espera de siete días para ese mismo grupo. Los rechazos automáticos por grupo privado, grupo completo o incorporación a otro grupo no activan ese periodo (Q129, Q147, Q169).
+- No existe estado `cancelled` ni operación para cancelar.
+- Las solicitudes resueltas se conservan para trazabilidad y auditoría. No se ofrece una interfaz de historial «Mis solicitudes» (Q177).
+- `resuelta_por` contiene al administrador/actor cuando la acción procede de una operación iniciada por una persona; puede ser `NULL` en la caducidad automática.
+- Las solicitudes son solo para conversaciones de tipo `group`. La columna constante `tipo = 'group'` y la FK compuesta `(conversacion_id, tipo)` lo garantizan en la base; el servicio valida además que sea descubrible y no archivado antes de insertar.
+
+### 17.6 Transacciones obligatorias para mantener las reglas
+
+Todas las operaciones siguientes deben ejecutarse en una transacción de base de datos. La aplicación no debe implementar estas reglas como validaciones visuales solamente.
+
+| Operación | Regla transaccional |
+|---|---|
+| Reemplazar intereses personales | Bloquear la fila `perfiles` del actor; validar catálogo y máximo de 10; reemplazar `intereses_usuario`; auditar. |
+| Cambiar intereses de grupo | Bloquear `conversaciones`; comprobar administrador activo; validar que sea grupo y máximo 5; reemplazar `intereses_conversacion`; auditar. |
+| Activar descubribilidad | Bloquear `conversaciones`; comprobar descripción 10–300 e intereses 1–5; establecer `es_descubrible = true`. |
+| Crear solicitud | Expirar solicitudes vencidas del actor; comprobar grupo descubrible, capacidad, membresía, cooldown y ausencia de otra pendiente; insertar. El índice único parcial protege concurrencia. |
+| Aceptar solicitud | Bloquear primero la fila del grupo (`SELECT ... FOR UPDATE`) y después la solicitud; comprobar estado, vencimiento, visibilidad y plazas; insertar membresía y cambiar solicitud a `accepted` atómicamente. |
+| Aceptar cuando está completo | No insertar membresía; cambiar solicitud a `rejected` con `motivo_resolucion = 'group_full'`. |
+| Añadir directamente al mismo grupo | Crear una sola membresía y pasar la solicitud pendiente del usuario para ese grupo a `accepted` con `direct_add_same_group`. |
+| Añadir a otro grupo | Crear la membresía y rechazar la solicitud pendiente global del usuario con `joined_other_group`. |
+| Alcanzar diez integrantes | Tras una incorporación que completa el grupo, rechazar las demás solicitudes pendientes del grupo con `group_full`. |
+| Volver a privado | Establecer `es_descubrible = false` y rechazar las solicitudes pendientes del grupo con `group_private`. |
+| Expirar solicitudes | Ejecutar `app.expire_pending_join_requests()` como `chatly_app` desde `pg_cron`; solo `pending` con `vence_en <= now()`; auditar y publicar `join_request.resolved`. |
+
+El límite de diez integrantes ya se valida bloqueando la fila de `conversaciones`; todas las vías nuevas de incorporación deben reutilizar ese mecanismo (Q8, Q130, Q176). El orden de bloqueos debe mantenerse igual en todos los servicios para reducir interbloqueos.
+
+### 17.7 Auditoría de operaciones sociales
+
+Se registran en `registros_auditoria`:
+
+- Cambio de `visibilidad_publica`.
+- Selección o modificación de intereses personales.
+- Publicación, despublicación y cambios de descripción/intereses de un grupo.
+- Creación de solicitud.
+- Aceptación o rechazo manual.
+- Rechazos automáticos por grupo privado, grupo completo o incorporación a otro grupo.
+- Expiración automática después de 14 días.
+
+No se auditan eventos efímeros de presencia ni cada actualización visual. Los estados y los cambios persistentes de solicitudes sí se auditan (Q43, Q52, Q71).
+
+### 17.8 Acceso y privacidad de las tablas sociales
+
+- `categorias_interes` e `intereses`: escritura administrativa desde migraciones/semillas; lectura mediante API.
+- `intereses_usuario`: acceso mediante backend. La API entrega al propietario su propia selección y solo entrega intereses de terceros cuando `visibilidad_publica = true`.
+- `intereses_conversacion`: acceso mediante backend. Un usuario externo solo recibe los nombres de intereses del grupo si este sigue descubrible.
+- `solicitudes_union`: acceso mediante backend. El solicitante solo consulta su solicitud pendiente; el administrador solo consulta solicitudes de su grupo. Ninguna consulta externa devuelve el correo. Al enviar una solicitud, el solicitante comparte con el administrador únicamente los intereses coincidentes con la temática del grupo, según la información aprobada para evaluar solicitudes (Q157); esto no modifica la visibilidad pública de su perfil.
+- `conversaciones`: un grupo descubrible expone únicamente nombre, descripción, intereses, cantidad de integrantes y plazas. Nunca lista de integrantes ni mensajes.
+- Los endpoints de descubrimiento requieren usuario autenticado y verificado. No se concede acceso a `anon`.
+
+### 17.9 Consultas de descubrimiento y notificaciones
+
+Las consultas de recomendaciones deben aplicar los criterios del contrato de API:
+
+- Personas: visibilidad pública, mínimo un interés compartido, exclusión de conversaciones privadas existentes, orden por coincidencias y empate aleatorio estable durante la paginación.
+- Grupos: `tipo = 'group'`, `es_descubrible = true`, no archivado, coincidencia mínima de un interés y exclusión de grupos donde el actor ya es miembro/administrador.
+- Búsqueda manual de grupos: búsqueda parcial por nombre y únicamente `es_descubrible = true`; no exige coincidencias.
+
+Las notificaciones de solicitudes se entregan como avisos visuales internos mediante eventos Realtime publicados con `app.publish_social_event(...)` (solicitud recibida al administrador; resultado/expiración al solicitante). La expiración la ejecuta el job de `pg_cron`. No se agrega una bandeja de historial ni una sección de solicitudes para el usuario. Los registros de `solicitudes_union` conservan el estado para la lógica de negocio.
+
+### 17.10 Relaciones sociales expresamente excluidas
+
+No se crean tablas de amistades, seguidores, solicitudes de contacto ni relaciones equivalentes. La interacción social se apoya en `conversaciones` de tipo `direct` y en `miembros_conversacion` para grupos (Q150, Q179).

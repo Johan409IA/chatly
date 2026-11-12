@@ -1,8 +1,10 @@
 """Repositorio de perfiles y contactos del usuario.
 
-Las tablas viven en `public` con RLS activa. Toda escritura se hace dentro de
-`actor_transaction`, que fija `app.current_user_id` para que las políticas
-`perfiles_alta_propia` y `contactos_alta_backend` permitan la fila del actor.
+Las tablas viven en `public` con RLS activa. Las escrituras y las lecturas de
+perfil se hacen dentro de `actor_transaction`, que fija `app.current_user_id`.
+La comprobación de alias usa `app.alias_exists`, función `SECURITY DEFINER` que
+solo devuelve un booleano y no expone filas. La selección de intereses se
+inserta en la misma transacción (ver `interest_repository`).
 
 Los nombres de columnas están en español (AGENTS.md); las clases, funciones y
 variables en inglés.
@@ -17,7 +19,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from Chatly.backend.core.errors import ConflictError, ErrorCode
-from Chatly.backend.database.session import actor_transaction, get_session_factory
+from Chatly.backend.database.session import actor_transaction, get_app_session_factory
+from Chatly.backend.repositories.interest_repository import get_interest_repository
 
 _ALIAS_TAKEN_MESSAGE = "Ese alias ya está en uso. Elige otro."
 
@@ -35,16 +38,12 @@ class ProfileRepository:
 
     async def alias_exists(self, alias: str) -> bool:
         """Indica si el alias ya está ocupado (comparación sin mayúsculas)."""
-        async with get_session_factory()() as session:
+        async with get_app_session_factory()() as session:
             result = await session.execute(
-                text(
-                    "select 1 from public.perfiles"
-                    " where lower(alias) = lower(:alias) and eliminado_en is null"
-                    " limit 1"
-                ),
+                text("select app.alias_exists(:alias)"),
                 {"alias": alias},
             )
-            return result.first() is not None
+            return bool(result.scalar())
 
     async def create_profile(
         self,
@@ -55,8 +54,14 @@ class ProfileRepository:
         birth_date: date,
         gender: str,
         email: str,
+        interest_ids: list[UUID] | None = None,
     ) -> None:
-        """Crea el perfil y su contacto normalizado en una sola transacción."""
+        """Crea el perfil, su contacto y su selección de intereses.
+
+        Todo ocurre en la misma `actor_transaction`: si un interés no existe o
+        ya no está activo, la transacción se revierte entera (no queda un
+        perfil sin intereses coherente).
+        """
         try:
             async with actor_transaction(UUID(user_id)) as session:
                 await session.execute(
@@ -81,6 +86,9 @@ class ProfileRepository:
                     ),
                     {"id": user_id, "correo": email.strip().lower()},
                 )
+                await get_interest_repository().insert_selection(
+                    session, UUID(user_id), interest_ids or []
+                )
         except IntegrityError as exc:
             constraint = getattr(getattr(exc.orig, "diag", None), "constraint_name", "") or ""
             if constraint == "uq_perfiles_alias":
@@ -94,7 +102,7 @@ class ProfileRepository:
 
     async def get_profile(self, user_id: str) -> ProfileData | None:
         """Perfil vigente del usuario, o `None` si aún no existe."""
-        async with get_session_factory()() as session:
+        async with actor_transaction(UUID(user_id)) as session:
             row = (
                 await session.execute(
                     text(

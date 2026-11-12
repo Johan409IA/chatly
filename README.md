@@ -51,6 +51,12 @@ Configura en `.env` los valores de Supabase indicados en `.env.example`. No comp
 uv run reflex run
 ```
 
+En Windows, `uv sync` instala `winloop` (grupo `dev`, solo `win32`) y granian lo
+detecta automáticamente; así psycopg async usa un bucle de eventos compatible.
+No definas `NODE_ENV=production` de forma global: en desarrollo Vite y React
+necesitan el runtime de desarrollo (`NODE_ENV=development`, que es el valor por
+defecto cuando la variable no existe).
+
 ## Tests
 
 ```sh

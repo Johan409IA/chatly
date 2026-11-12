@@ -28,5 +28,5 @@ def confirm_page() -> rx.Component:
         ),
         form_alert(),
         info_banner(),
-        rx.link("Ir a iniciar sesión", href="/login", size="2", margin_top="1rem"),
+        rx.link("Ir a iniciar sesión", href="/login", size="2"),
     )
