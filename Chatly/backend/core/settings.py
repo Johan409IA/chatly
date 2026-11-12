@@ -19,6 +19,7 @@ class Settings(BaseSettings):
 
     app_env: Literal["development", "test", "production"] = "development"
     database_url: str
+    app_database_url: str | None = None
     test_database_url: str | None = None
     supabase_url: str
     supabase_publishable_key: str
@@ -44,7 +45,7 @@ class Settings(BaseSettings):
         """Orígenes permitidos para el navegador (lista separada por comas)."""
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
-    @field_validator("database_url", "test_database_url")
+    @field_validator("database_url", "app_database_url", "test_database_url")
     @classmethod
     def _check_driver(cls, value: str | None) -> str | None:
         if value is not None and not value.startswith("postgresql+psycopg://"):

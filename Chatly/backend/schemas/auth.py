@@ -13,8 +13,9 @@ Errores:
 import re
 from datetime import date
 from typing import Any, Literal
+from uuid import UUID
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from Chatly.backend.core.errors import DomainError, ErrorCode
 
@@ -32,6 +33,10 @@ _PASSWORD_MESSAGE = (
 
 _MIN_AGE = 18
 _MAX_AGE = 120
+
+# Máximo de intereses personales por usuario (Q124). El catálogo completo vive
+# en `docs/api-contracts.md` §4.1 y §16.2.
+MAX_INTERESTS = 10
 
 
 def email_is_valid(value: str) -> bool:
@@ -72,7 +77,10 @@ class LoginRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    """Cuerpo de `POST /api/auth/register` (§4.1); todo obligatorio (Q109–Q111)."""
+    """Cuerpo de `POST /api/auth/register` (§4.1); todo obligatorio (Q109–Q111).
+
+    `interest_ids` es opcional (Q117, Q178): entre 0 y 10 IDs del catálogo.
+    """
 
     email: str
     password: str
@@ -80,6 +88,7 @@ class RegisterRequest(BaseModel):
     display_name: str
     birth_date: date
     gender: Literal["femenino", "masculino"]
+    interest_ids: list[UUID] = Field(default_factory=list)
 
     @field_validator("email")
     @classmethod
@@ -88,6 +97,24 @@ class RegisterRequest(BaseModel):
         if not _EMAIL_RE.fullmatch(normalized):
             raise ValueError(_EMAIL_MESSAGE)
         return normalized
+
+    @field_validator("interest_ids")
+    @classmethod
+    def _check_interest_ids(cls, value: list[UUID]) -> list[UUID]:
+        """Sin duplicados y como mucho 10 intereses (§4.1)."""
+        if len(set(value)) != len(value):
+            raise DomainError(
+                ErrorCode.VALIDATION_ERROR,
+                "No repitas intereses en la selección.",
+                status_code=422,
+            )
+        if len(value) > MAX_INTERESTS:
+            raise DomainError(
+                ErrorCode.INTEREST_LIMIT_EXCEEDED,
+                f"Puedes elegir hasta {MAX_INTERESTS} intereses.",
+                status_code=422,
+            )
+        return value
 
     @field_validator("alias")
     @classmethod

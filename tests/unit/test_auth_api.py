@@ -7,7 +7,7 @@ verificador JWT falso. Sin red ni Supabase real.
 
 from datetime import date, timedelta
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import jwt
 import pytest
@@ -29,6 +29,11 @@ from Chatly.backend.services.auth_service import AuthService, get_auth_service
 _ACTOR_ID = uuid4()
 _ACCESS_TOKEN = "token-de-acceso"
 _REFRESH_TOKEN = "token-de-refresco"
+
+# IDs de intereses del catálogo (los valida el doble del repositorio).
+_INTERES_PROGRAMACION = UUID("11111111-1111-4111-8111-111111111111")
+_INTERES_IA = UUID("22222222-2222-4222-8222-222222222222")
+_INTERES_DESCONOCIDO = UUID("99999999-9999-4999-8999-999999999999")
 
 _REGISTER_PAYLOAD = {
     "email": "  Johan@Example.COM ",
@@ -70,6 +75,16 @@ class _FakeProfileRepository:
         return type("Profile", (), {"alias": data["alias"], "display_name": data["display_name"]})()
 
 
+class _FakeInterestRepository:
+    """Doble del repositorio de intereses: catálogo en memoria."""
+
+    def __init__(self, active_ids: set[UUID] | None = None) -> None:
+        self.active_ids = set(active_ids) if active_ids is not None else set()
+
+    async def active_interest_ids(self) -> set[UUID]:
+        return set(self.active_ids)
+
+
 class _FakeSupabaseClient:
     """Doble del cliente REST de Supabase Auth con respuestas del contrato."""
 
@@ -87,9 +102,7 @@ class _FakeSupabaseClient:
         if self.error_to_raise is not None:
             raise self.error_to_raise
 
-    async def sign_up(
-        self, email: str, password: str, redirect_to: str | None = None
-    ) -> str:
+    async def sign_up(self, email: str, password: str, redirect_to: str | None = None) -> str:
         self.calls.append("sign_up")
         await self._maybe_fail()
         return "id-de-supabase"
@@ -118,9 +131,7 @@ class _FakeSupabaseClient:
         self.calls.append("update_password")
         await self._maybe_fail()
 
-    async def verify_signup(
-        self, token_hash: str, verify_type: str = "signup"
-    ) -> dict[str, Any]:
+    async def verify_signup(self, token_hash: str, verify_type: str = "signup") -> dict[str, Any]:
         self.calls.append("verify_signup")
         await self._maybe_fail()
         return {}
@@ -136,12 +147,14 @@ def fake_client(monkeypatch) -> _FakeSupabaseClient:
     """Doble de Supabase + verificador JWT, inyectados en el servicio."""
     fake = _FakeSupabaseClient()
     profiles = _FakeProfileRepository()
+    interests = _FakeInterestRepository({_INTERES_PROGRAMACION, _INTERES_IA})
     monkeypatch.setattr(auth_service_module, "get_supabase_auth_client", lambda: fake)
     monkeypatch.setattr(auth_service_module, "get_jwt_verifier", lambda: _StubVerifier())
 
-    service = AuthService(fake, profiles)
+    service = AuthService(fake, profiles, interests)
     monkeypatch.setattr(auth_service_module, "get_auth_service", lambda: service)
     client_profiles = profiles
+    client_interests = interests
 
     app = FastAPI()
     app.include_router(auth_router)
@@ -152,6 +165,7 @@ def fake_client(monkeypatch) -> _FakeSupabaseClient:
     client = TestClient(app, raise_server_exceptions=False)
     client.fake = fake  # type: ignore[attr-defined]
     client.profiles = client_profiles  # type: ignore[attr-defined]
+    client.interests = client_interests  # type: ignore[attr-defined]
     yield client
     app.dependency_overrides.clear()
 
@@ -224,6 +238,75 @@ def test_registro_con_correo_repetido_responde_409(fake_client: TestClient) -> N
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "email_already_registered"
+
+
+# ------------------------------------------------------- registro con intereses
+
+
+def test_registro_persiste_los_intereses(fake_client: TestClient) -> None:
+    """Los `interest_ids` válidos llegan al repositorio de perfiles."""
+    payload = {
+        **_REGISTER_PAYLOAD,
+        "interest_ids": [str(_INTERES_PROGRAMACION), str(_INTERES_IA)],
+    }
+    response = fake_client.post("/api/auth/register", json=payload)
+
+    assert response.status_code == 201
+    profile = fake_client.profiles.profiles["id-de-supabase"]  # type: ignore[attr-defined]
+    assert profile["interest_ids"] == [_INTERES_PROGRAMACION, _INTERES_IA]
+
+
+def test_registro_sin_intereses_registra_lista_vacia(fake_client: TestClient) -> None:
+    """El registro sin intereses es válido (la selección es opcional)."""
+    response = fake_client.post("/api/auth/register", json=_REGISTER_PAYLOAD)
+
+    assert response.status_code == 201
+    profile = fake_client.profiles.profiles["id-de-supabase"]  # type: ignore[attr-defined]
+    assert profile["interest_ids"] == []
+
+
+def test_registro_con_mas_de_diez_intereses_responde_422(fake_client: TestClient) -> None:
+    """Más de 10 intereses devuelve `interest_limit_exceeded` (Q124)."""
+    interest_ids = [str(uuid4()) for _ in range(11)]
+    payload = {**_REGISTER_PAYLOAD, "interest_ids": interest_ids}
+    response = fake_client.post("/api/auth/register", json=payload)
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "interest_limit_exceeded"
+    assert fake_client.fake.calls == []  # type: ignore[attr-defined]
+
+
+def test_registro_con_intereses_duplicados_responde_422(fake_client: TestClient) -> None:
+    """Los IDs repetidos se rechazan con `validation_error`."""
+    payload = {
+        **_REGISTER_PAYLOAD,
+        "interest_ids": [str(_INTERES_PROGRAMACION), str(_INTERES_PROGRAMACION)],
+    }
+    response = fake_client.post("/api/auth/register", json=payload)
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+    assert fake_client.fake.calls == []  # type: ignore[attr-defined]
+
+
+def test_registro_con_interes_desconocido_responde_422(fake_client: TestClient) -> None:
+    """Un ID que no está en el catálogo no crea la cuenta en Supabase."""
+    payload = {**_REGISTER_PAYLOAD, "interest_ids": [str(_INTERES_DESCONOCIDO)]}
+    response = fake_client.post("/api/auth/register", json=payload)
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+    assert fake_client.fake.calls == []  # type: ignore[attr-defined]
+
+
+def test_registro_con_interes_inactivo_responde_422(fake_client: TestClient) -> None:
+    """Un interés que existe pero está inactivo tampoco se acepta."""
+    fake_client.interests.active_ids.clear()  # type: ignore[attr-defined]
+    payload = {**_REGISTER_PAYLOAD, "interest_ids": [str(_INTERES_PROGRAMACION)]}
+    response = fake_client.post("/api/auth/register", json=payload)
+
+    assert response.status_code == 422
+    assert fake_client.fake.calls == []  # type: ignore[attr-defined]
 
 
 # ------------------------------------------------------------------------ login

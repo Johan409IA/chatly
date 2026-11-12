@@ -17,15 +17,23 @@ en `/verify-pending`.
 """
 
 import json
+import logging
 import re
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
 import reflex as rx
 
 from Chatly.backend.core.settings import get_settings
+from Chatly.backend.repositories.interest_repository import get_interest_repository
+
+logger = logging.getLogger(__name__)
 
 GENDER_OPTIONS = ("femenino", "masculino")
+
+# Máximo de intereses personales (Q124); el mismo límite valida el backend.
+MAX_INTERESTS = 10
 
 # El frontend (:3000) y el API (:8000) son orígenes distintos en desarrollo;
 # `fetch` relativo iría al servidor de Vite. Vacío = mismo origen (producción).
@@ -49,6 +57,8 @@ _ERROR_TEXTS = {
     "invalid_credentials": "Correo o contraseña incorrectos.",
     "unauthorized": "El enlace no es válido o ha caducado.",
     "rate_limited": "Demasiados intentos. Espera unos minutos y prueba de nuevo.",
+    "interest_limit_exceeded": "Puedes elegir hasta 10 intereses.",
+    "validation_error": "Revisa los datos del formulario.",
 }
 
 _GENERIC_ERRORS = {
@@ -142,6 +152,11 @@ def parse_birth_date(value: str) -> date:
 # POST con JSON, `credentials: "include"` (cookies HttpOnly cross-origin), y
 # devolución como STRING JSON para que el resultado atraviese el puente de
 # eventos sin ambigüedad.
+#
+# El script se evalúa con `eval` en el navegador, así que debe ser una
+# EXPRESIÓN: por eso va entre paréntesis y se invoca al final (`(... )()`).
+# Si fuera solo la función, `eval` devolvería la función, el callback
+# recibiría un valor no serializable y el servidor recibiría el payload vacío.
 _API_JS = (
     "const rawApi = '@API_BASE@';"
     "const apiBase = rawApi"
@@ -151,9 +166,7 @@ _API_JS = (
 )
 
 _FETCH_TEMPLATE = (
-    "async () => {"
-    + _API_JS
-    + 'const res = await fetch(apiBase + "@PATH@", {'
+    "(async () => {" + _API_JS + 'const res = await fetch(apiBase + "@PATH@", {'
     'method: "POST",'
     'headers: {"Content-Type": "application/json"},'
     'credentials: "include",'
@@ -163,15 +176,13 @@ _FETCH_TEMPLATE = (
     "let body = {};"
     "if (text) { try { body = JSON.parse(text); } catch (ignored) {} }"
     "return JSON.stringify({ status: res.status, body });"
-    "}"
+    "})()"
 )
 
 # Confirmación: el enlace de Supabase puede traer `?token_hash=`, `?code=`
 # (PKCE) o los tokens en el fragmento (flujo implícito). Se aceptan las tres.
 _CONFIRM_TEMPLATE = (
-    "async () => {"
-    + _API_JS
-    + "const search = new URLSearchParams(window.location.search);"
+    "(async () => {" + _API_JS + "const search = new URLSearchParams(window.location.search);"
     "const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));"
     "const tokenHash = search.get('token_hash') || hash.get('token_hash') || '';"
     "const code = search.get('code') || hash.get('code') || '';"
@@ -194,7 +205,7 @@ _CONFIRM_TEMPLATE = (
     "let body = {};"
     "if (text) { try { body = JSON.parse(text); } catch (ignored) {} }"
     "return JSON.stringify({ status: res.status, body, already: false });"
-    "}"
+    "})()"
 )
 
 
@@ -211,6 +222,23 @@ def _fetch_script(path: str, payload: Any) -> str:
     )
 
 
+@dataclass
+class InterestItem:
+    """Interés concreto del catálogo, listo para la interfaz."""
+
+    id: str
+    name: str
+
+
+@dataclass
+class InterestCategory:
+    """Categoría del catálogo con los intereses que la componen."""
+
+    id: str
+    name: str
+    interests: list[InterestItem] = field(default_factory=list)
+
+
 class AuthState(rx.State):
     """Campos y eventos de las pantallas de autenticación."""
 
@@ -223,6 +251,11 @@ class AuthState(rx.State):
     birth_date: str = ""  # ISO «yyyy-mm-dd» tal como llega del input date.
     gender: str = ""
 
+    # Catálogo de intereses y selección opcional del registro (Q117, Q178).
+    interest_catalog: list[InterestCategory] = []
+    selected_interest_ids: list[str] = []
+    interest_message: str = ""
+
     # Estados de UI que consumen las pantallas.
     is_loading: bool = False
     error_message: str = ""
@@ -231,6 +264,11 @@ class AuthState(rx.State):
 
     # Correo del alta, para mostrarlo en «verificación pendiente» y reenvío.
     registered_email: str = ""
+
+    @rx.var
+    def selected_interests_count(self) -> int:
+        """Cuántos intereses hay seleccionados ahora mismo (contador `N/10`)."""
+        return len(self.selected_interest_ids)
 
     # ------------------------------------------------------------------
     # Setters de los inputs. Reflex 0.10 ya no genera `set_<campo>` solo
@@ -264,6 +302,52 @@ class AuthState(rx.State):
     @rx.event
     def set_gender(self, value: str) -> None:
         self.gender = value
+
+    # ------------------------------------------------------------------
+    # Intereses (selección opcional del registro).
+    # ------------------------------------------------------------------
+
+    @rx.event
+    async def load_interests(self) -> None:
+        """Carga el catálogo público de intereses (una sola vez).
+
+        El catálogo no necesita sesión ni cookies: se lee en el servidor con
+        `app.catalogo_intereses()`, así que no usa `fetch` (esa regla aplica a
+        las operaciones que fijan la sesión).
+        """
+        if self.interest_catalog:
+            return
+        try:
+            catalog = await get_interest_repository().list_catalog()
+        except Exception:  # pragma: no cover - depende del entorno
+            logger.warning("No se pudo cargar el catálogo de intereses", exc_info=True)
+            return
+        self.interest_catalog = [
+            InterestCategory(
+                id=str(category.id),
+                name=category.name,
+                interests=[
+                    InterestItem(id=str(interest.id), name=interest.name)
+                    for interest in category.interests
+                ],
+            )
+            for category in catalog
+        ]
+
+    @rx.event
+    def toggle_interest(self, interest_id: str) -> None:
+        """Añade o quita un interés de la selección; el máximo es 10 (Q124)."""
+        if interest_id in self.selected_interest_ids:
+            self.selected_interest_ids = [
+                selected for selected in self.selected_interest_ids if selected != interest_id
+            ]
+            self.interest_message = ""
+            return
+        if len(self.selected_interest_ids) >= MAX_INTERESTS:
+            self.interest_message = f"Puedes elegir hasta {MAX_INTERESTS} intereses."
+            return
+        self.selected_interest_ids = [*self.selected_interest_ids, interest_id]
+        self.interest_message = ""
 
     # ------------------------------------------------------------------
     # Eventos de las pantallas (on_click / on_submit / on_load).
@@ -300,6 +384,7 @@ class AuthState(rx.State):
             "display_name": self.display_name.strip(),
             "birth_date": (parsed_birth_date or today).isoformat(),
             "gender": self.gender,
+            "interest_ids": list(self.selected_interest_ids),
         }
         # El alta no inicia sesión (Q15); no se conserva la contraseña.
         self.registered_email = payload["email"]

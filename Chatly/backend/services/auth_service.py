@@ -12,15 +12,20 @@ roadmap.md:385-386); los puntos donde se registrarán están marcados.
 import logging
 from functools import lru_cache
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends
 
-from Chatly.backend.core.errors import ConflictError, ErrorCode
+from Chatly.backend.core.errors import ConflictError, ErrorCode, ValidationError
 from Chatly.backend.core.jwt import get_jwt_verifier
 from Chatly.backend.core.settings import get_settings
 from Chatly.backend.integrations.supabase.auth_client import (
     SupabaseAuthClient,
     get_supabase_auth_client,
+)
+from Chatly.backend.repositories.interest_repository import (
+    InterestRepository,
+    get_interest_repository,
 )
 from Chatly.backend.repositories.profile_repository import (
     ProfileRepository,
@@ -48,16 +53,22 @@ class AuthService:
         self,
         client: SupabaseAuthClient,
         profiles: ProfileRepository | None = None,
+        interests: InterestRepository | None = None,
     ) -> None:
         self._client = client
         self._profiles = profiles or get_profile_repository()
+        self._interests = interests or get_interest_repository()
 
     async def register(self, request: RegisterRequest) -> RegisterResponse:
         """Crea la cuenta en Supabase Auth y persiste el perfil; no inicia sesión (Q15)."""
         if await self._profiles.alias_exists(request.alias):
-            raise ConflictError(
-                ErrorCode.ALIAS_TAKEN, "Ese alias ya está en uso. Elige otro."
-            )
+            raise ConflictError(ErrorCode.ALIAS_TAKEN, "Ese alias ya está en uso. Elige otro.")
+
+        # Los intereses se validan contra el catálogo antes de crear la cuenta:
+        # si un ID no existe o ya no está activo, el alta se rechaza y no queda
+        # un usuario huérfano en Supabase Auth.
+        if request.interest_ids:
+            await self._check_interests(request.interest_ids)
 
         settings = get_settings()
         confirm_url = f"{settings.frontend_url.rstrip('/')}/auth/confirm"
@@ -72,6 +83,7 @@ class AuthService:
                 birth_date=request.birth_date,
                 gender=request.gender,
                 email=request.email,
+                interest_ids=list(request.interest_ids),
             )
         else:
             logger.warning("Supabase no devolvió el id del usuario al registrarse")
@@ -81,6 +93,15 @@ class AuthService:
             status="verification_required",
             email=request.email,
         )
+
+    async def _check_interests(self, interest_ids: list[UUID]) -> None:
+        """Verifica que todos los IDs enviados existen y están activos."""
+        active_ids = await self._interests.active_interest_ids()
+        unknown = [interest_id for interest_id in interest_ids if interest_id not in active_ids]
+        if unknown:
+            raise ValidationError(
+                "Alguno de los intereses seleccionados no existe o ya no está disponible."
+            )
 
     async def login(self, request: LoginRequest) -> AuthSessionData:
         """Grant `password` de Supabase; devuelve tokens validados localmente."""

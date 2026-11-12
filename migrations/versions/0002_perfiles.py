@@ -71,8 +71,7 @@ def upgrade() -> None:
         )
 
     op.execute(
-        "create unique index if not exists uq_perfiles_alias"
-        " on public.perfiles (lower(alias))"
+        "create unique index if not exists uq_perfiles_alias on public.perfiles (lower(alias))"
     )
     op.execute(
         "create index if not exists ix_perfiles_alias_prefijo"
@@ -143,9 +142,7 @@ def upgrade() -> None:
         end $$;
         """
     )
-    op.execute(
-        "drop trigger if exists trg_perfiles_fecha_nacimiento on public.perfiles"
-    )
+    op.execute("drop trigger if exists trg_perfiles_fecha_nacimiento on public.perfiles")
     op.execute(
         """
         create trigger trg_perfiles_fecha_nacimiento
@@ -172,9 +169,7 @@ def upgrade() -> None:
             for each row execute function public.tocar_actualizado_en()
         """
     )
-    op.execute(
-        "drop trigger if exists trg_contactos_actualizado on public.contactos_usuario"
-    )
+    op.execute("drop trigger if exists trg_contactos_actualizado on public.contactos_usuario")
     op.execute(
         """
         create trigger trg_contactos_actualizado before update on public.contactos_usuario
@@ -224,9 +219,7 @@ def upgrade() -> None:
         $$;
         """
     )
-    op.execute(
-        "revoke all on function app.buscar_usuario_por_correo(text) from public"
-    )
+    op.execute("revoke all on function app.buscar_usuario_por_correo(text) from public")
 
     # 7) RLS y políticas.
     op.execute("alter table public.perfiles enable row level security")
