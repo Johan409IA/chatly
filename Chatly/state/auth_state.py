@@ -35,6 +35,20 @@ GENDER_OPTIONS = ("femenino", "masculino")
 # Máximo de intereses personales (Q124); el mismo límite valida el backend.
 MAX_INTERESTS = 10
 
+# Pasos del asistente de registro (diseño `assets/ux-ui/`):
+# 1 nombre, 2 correo y alias, 3 contraseña, 4 fecha y género, 5 intereses.
+REGISTER_STEPS = 5
+
+# Paso al que vuelve el usuario cuando el backend rechaza un dato:
+# el error se muestra en la pantalla donde está el campo que hay que corregir.
+_ERROR_STEP: dict[str, int] = {
+    "email_already_registered": 2,
+    "alias_taken": 2,
+    "weak_password": 3,
+    "validation_error": 1,
+    "interest_limit_exceeded": 5,
+}
+
 # El frontend (:3000) y el API (:8000) son orígenes distintos en desarrollo;
 # `fetch` relativo iría al servidor de Vite. Vacío = mismo origen (producción).
 _API_BASE = get_settings().api_public_url.rstrip("/")
@@ -148,6 +162,16 @@ def parse_birth_date(value: str) -> date:
     return date.fromisoformat(value.strip())
 
 
+def name_error(display_name: str) -> str:
+    """Mensaje de error del nombre completo; cadena vacía si el nombre es válido."""
+    name = display_name.strip()
+    if not name:
+        return "Escribe tu nombre para empezar a conectar."
+    if not 2 <= len(name) <= 60:
+        return "El nombre debe tener entre 2 y 60 caracteres."
+    return ""
+
+
 # Plantilla de `fetch` que ejecuta el navegador (misma forma del contrato §4):
 # POST con JSON, `credentials: "include"` (cookies HttpOnly cross-origin), y
 # devolución como STRING JSON para que el resultado atraviese el puente de
@@ -256,11 +280,24 @@ class AuthState(rx.State):
     selected_interest_ids: list[str] = []
     interest_message: str = ""
 
+    # Paso actual del asistente de registro (1..REGISTER_STEPS).
+    register_step: int = 1
+
     # Estados de UI que consumen las pantallas.
     is_loading: bool = False
     error_message: str = ""
     info_message: str = ""
-    field_errors: dict[str, str] = {}
+
+    # Mensajes de error por campo. Son vars sueltas y no un dict: al leer
+    # `state.dict["clave"]` en el cliente, la clave que no existe llega como
+    # `undefined` y el mensaje no se pinta (bug de la 0.10.1).
+    error_display_name: str = ""
+    error_email: str = ""
+    error_alias: str = ""
+    error_password: str = ""
+    error_password_confirm: str = ""
+    error_birth_date: str = ""
+    error_gender: str = ""
 
     # Correo del alta, para mostrarlo en «verificación pendiente» y reenvío.
     registered_email: str = ""
@@ -270,6 +307,16 @@ class AuthState(rx.State):
         """Cuántos intereses hay seleccionados ahora mismo (contador `N/10`)."""
         return len(self.selected_interest_ids)
 
+    @rx.var
+    def can_advance(self) -> bool:
+        """El paso actual tiene los datos mínimos para pasar al siguiente."""
+        return not self._step_errors(self.register_step)
+
+    @rx.var
+    def is_last_step(self) -> bool:
+        """El asistente está en el paso final (el de los intereses)."""
+        return self.register_step >= REGISTER_STEPS
+
     # ------------------------------------------------------------------
     # Setters de los inputs. Reflex 0.10 ya no genera `set_<campo>` solo
     # (`state_auto_setters=False`), así que se declaran explícitamente.
@@ -278,30 +325,37 @@ class AuthState(rx.State):
     @rx.event
     def set_email(self, value: str) -> None:
         self.email = value
+        self._clear_field_error("email")
 
     @rx.event
     def set_password(self, value: str) -> None:
         self.password = value
+        self._clear_field_error("password")
 
     @rx.event
     def set_password_confirm(self, value: str) -> None:
         self.password_confirm = value
+        self._clear_field_error("password_confirm")
 
     @rx.event
     def set_alias(self, value: str) -> None:
         self.alias = value
+        self._clear_field_error("alias")
 
     @rx.event
     def set_display_name(self, value: str) -> None:
         self.display_name = value
+        self._clear_field_error("display_name")
 
     @rx.event
     def set_birth_date(self, value: str) -> None:
         self.birth_date = value
+        self._clear_field_error("birth_date")
 
     @rx.event
     def set_gender(self, value: str) -> None:
         self.gender = value
+        self._clear_field_error("gender")
 
     # ------------------------------------------------------------------
     # Intereses (selección opcional del registro).
@@ -350,12 +404,106 @@ class AuthState(rx.State):
         self.interest_message = ""
 
     # ------------------------------------------------------------------
+    # Asistente de registro (pasos del diseño `assets/ux-ui/`).
+    # ------------------------------------------------------------------
+
+    @rx.event
+    def next_step(self) -> None:
+        """Avanza al siguiente paso; si falta algo, muestra el error del campo."""
+        self._advance_step()
+
+    @rx.event
+    def prev_step(self) -> None:
+        """Vuelve al paso anterior del asistente."""
+        if self.register_step > 1:
+            self.register_step -= 1
+            self._set_field_errors({})
+
+    @rx.event
+    def reset_register(self) -> None:
+        """Deja el asistente en el primer paso (al entrar en `/register`)."""
+        self.register_step = 1
+        self._set_field_errors({})
+        self.error_message = ""
+
+    @rx.event
+    def clear_messages(self) -> None:
+        """Limpia los avisos al entrar en una pantalla (evita arrastrar errores)."""
+        self.error_message = ""
+        self.info_message = ""
+        self._set_field_errors({})
+
+    def _advance_step(self) -> None:
+        """Comprueba el paso actual y pasa al siguiente si está completo."""
+        errors = self._step_errors(self.register_step)
+        if errors:
+            self._set_field_errors(errors)
+            return
+        self._set_field_errors({})
+        if self.register_step < REGISTER_STEPS:
+            self.register_step += 1
+
+    def _step_errors(self, step: int) -> dict[str, str]:
+        """Errores de los campos del paso indicado; vacío si el paso está completo."""
+        errors: dict[str, str] = {}
+        if step == 1:
+            message = name_error(self.display_name)
+            if message:
+                errors["display_name"] = message
+        elif step == 2:
+            if not _EMAIL_RE.fullmatch(normalized_email(self.email)):
+                errors["email"] = "Escribe un correo válido."
+            if not _ALIAS_RE.fullmatch(normalized_alias(self.alias)):
+                errors["alias"] = (
+                    "El alias debe tener 3–20 caracteres: letra inicial y luego letras, "
+                    "números o _."
+                )
+        elif step == 3:
+            if not password_is_strong(self.password):
+                errors["password"] = (
+                    "La contraseña necesita 8 caracteres, una mayúscula, una minúscula "
+                    "y un símbolo."
+                )
+            if not self.password_confirm or self.password_confirm != self.password:
+                errors["password_confirm"] = "Las contraseñas no coinciden."
+        elif step == 4:
+            errors.update(self._birth_date_errors())
+            if self.gender not in GENDER_OPTIONS:
+                errors["gender"] = "Selecciona tu género."
+        return errors
+
+    def _birth_date_errors(self) -> dict[str, str]:
+        """Errores de la fecha de nacimiento (vacío si la fecha es válida)."""
+        if not self.birth_date.strip():
+            return {"birth_date": "Escribe tu fecha para continuar."}
+        try:
+            parsed = parse_birth_date(self.birth_date)
+        except ValueError:
+            return {"birth_date": _BIRTH_ERROR}
+        age = calculate_age(parsed)
+        if not _BIRTH_MIN_AGE <= age <= _BIRTH_MAX_AGE:
+            return {"birth_date": _BIRTH_ERROR}
+        return {}
+
+    # ------------------------------------------------------------------
     # Eventos de las pantallas (on_click / on_submit / on_load).
     # ------------------------------------------------------------------
 
     @rx.event
+    def handle_register_step(self, _form_data: dict | None = None) -> rx.event.EventSpec:
+        """Envía del formulario del asistente: avanza de paso o cierra el alta."""
+        if self.register_step < REGISTER_STEPS:
+            self._advance_step()
+            return []
+        return self._register_event()
+
+    @rx.event
     def handle_register(self, _form_data: dict | None = None) -> rx.event.EventSpec:
         """Valida en cliente y envía el alta vía fetch; termina en «verificación pendiente»."""
+        return self._register_event()
+
+    def _register_event(self) -> rx.event.EventSpec:
+        """Valida los datos del alta y devuelve el evento que la envía."""
         self._clear_form_errors()
         today = date.today()
         parsed_birth_date: date | None = None
@@ -375,7 +523,7 @@ class AuthState(rx.State):
             today,
         )
         if errors:
-            self.field_errors = errors
+            self._set_field_errors(errors)
             return []
         payload = {
             "email": normalized_email(self.email),
@@ -401,6 +549,10 @@ class AuthState(rx.State):
         status, body = self._parse_result(result)
         if status != 201:
             self.error_message = self._error_text(body, status)
+            # Si el fallo es de un campo, vuelve al paso donde está ese campo.
+            step = _ERROR_STEP.get(self._error_code(body, status))
+            if step is not None:
+                self.register_step = step
             return []
         self.info_message = ""
         return rx.redirect("/verify-pending")
@@ -464,7 +616,7 @@ class AuthState(rx.State):
         self._clear_form_errors()
         email = normalized_email(self.email)
         if not _EMAIL_RE.fullmatch(email):
-            self.field_errors = {"email": "Escribe un correo válido."}
+            self.error_email = "Escribe un correo válido."
             return []
         self.is_loading = True
         self._clear_secrets()
@@ -501,7 +653,7 @@ class AuthState(rx.State):
         if self.password_confirm != self.password or not self.password_confirm:
             errors["password_confirm"] = "Las contraseñas no coinciden."
         if errors:
-            self.field_errors = errors
+            self._set_field_errors(errors)
             return []
         password = self.password
         self.is_loading = True
@@ -572,23 +724,56 @@ class AuthState(rx.State):
         return int(decoded.get("status") or 0), decoded.get("body") or {}
 
     @classmethod
-    def _error_text(cls, body: dict[str, object], status: int) -> str:
-        """Traduce el código de error del cuerpo al mensaje en español acordado."""
-        if status == 0:
-            return _NETWORK_ERROR
+    def _error_code(cls, body: dict[str, object], status: int) -> str:
+        """Código de error del cuerpo de la respuesta (o el del estado HTTP)."""
         error = body.get("error") or {}
         if not isinstance(error, dict):
             error = {}
         code = str(error.get("code") or body.get("error_code") or "")
         if not code:
             code = _ERROR_CODES_BY_STATUS.get(status, "unauthorized")
+        return code
+
+    @classmethod
+    def _error_text(cls, body: dict[str, object], status: int) -> str:
+        """Traduce el código de error del cuerpo al mensaje en español acordado."""
+        if status == 0:
+            return _NETWORK_ERROR
+        code = cls._error_code(body, status)
         return _ERROR_TEXTS.get(code) or _GENERIC_ERRORS.get(status, _UNEXPECTED_ERROR)
 
     def _clear_form_errors(self) -> None:
         """Resetea los mensajes antes de cada intento."""
         self.error_message = ""
         self.info_message = ""
-        self.field_errors = {}
+        self._set_field_errors({})
+
+    def _set_field_errors(self, errors: dict[str, str]) -> None:
+        """Vuelca los errores por campo en las vars sueltas que ve el cliente."""
+        self.error_display_name = errors.get("display_name", "")
+        self.error_email = errors.get("email", "")
+        self.error_alias = errors.get("alias", "")
+        self.error_password = errors.get("password", "")
+        self.error_password_confirm = errors.get("password_confirm", "")
+        self.error_birth_date = errors.get("birth_date", "")
+        self.error_gender = errors.get("gender", "")
+
+    def _clear_field_error(self, field: str) -> None:
+        """Quita el mensaje de error de un campo cuando el usuario lo corrige."""
+        if field == "display_name":
+            self.error_display_name = ""
+        elif field == "email":
+            self.error_email = ""
+        elif field == "alias":
+            self.error_alias = ""
+        elif field == "password":
+            self.error_password = ""
+        elif field == "password_confirm":
+            self.error_password_confirm = ""
+        elif field == "birth_date":
+            self.error_birth_date = ""
+        elif field == "gender":
+            self.error_gender = ""
 
     def _clear_secrets(self) -> None:
         """Limpia los campos con credenciales tras cada envío."""
