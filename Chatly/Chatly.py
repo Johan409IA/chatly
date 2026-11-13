@@ -72,15 +72,23 @@ api_app.add_exception_handler(DomainError, domain_error_handler)
 api_app.add_exception_handler(RequestValidationError, validation_exception_handler)
 api_app.add_exception_handler(Exception, unhandled_exception_handler)
 
-app = rx.App(api_transformer=api_app)
+app = rx.App(api_transformer=api_app, stylesheets=["auth.css"])
 # Página protegida: sin sesión válida, la guarda redirige a /login.
 app.add_page(index, on_load=[SessionState.guard_page])
 # Pantallas de autenticación (públicas; login redirige si ya hay sesión).
-app.add_page(login_page, route="/login", on_load=[SessionState.redirect_if_authenticated])
+app.add_page(
+    login_page,
+    route="/login",
+    on_load=[SessionState.redirect_if_authenticated, AuthState.clear_messages],
+)
 app.add_page(
     register_page,
     route="/register",
-    on_load=[SessionState.redirect_if_authenticated, AuthState.load_interests],
+    on_load=[
+        SessionState.redirect_if_authenticated,
+        AuthState.reset_register,
+        AuthState.load_interests,
+    ],
 )
 app.add_page(
     verify_pending_page, route="/verify-pending", on_load=[SessionState.redirect_if_authenticated]

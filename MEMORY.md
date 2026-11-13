@@ -12,6 +12,8 @@ Memoria del proyecto entre sesiones de agente. Máximo ~50 líneas.
 - **Selección opcional de intereses en el registro**: `RegisterRequest.interest_ids` (0–10), `GET /api/interests` público, bloque «Intereses (opcional)» con accordion y contador `N/10` en `/register`.
 - **Servidor en Windows resuelto**: `winloop` en el grupo `dev` con marker `sys_platform == 'win32'`. Granian usa `loop=auto` y elige winloop; así psycopg async funciona con `uv run reflex run` sin flags ni servidores alternativos.
 - Verificado: **64 unitarias y 21 integración passed**, `ruff check` limpio, `reflex compile --dry` OK. En vivo con `uv run reflex run` (granian + winloop): `/api/health`, `/api/interests` (5 categorías, 16 intereses) y `/register` en Playwright (catálogo cargado, contador `0/10`→`10/10`, el undécimo se bloquea con aviso).
+- **Login y registro rediseñados** según `assets/ux-ui/`: layout de dos columnas con panel de marca (red de nodos en SVG) + panel oscuro; el registro es un **asistente de 5 pasos** (nombre → correo/alias → contraseña → fecha/género → intereses). Estilos en `assets/auth.css` (se incluye con `rx.App(stylesheets=["auth.css"])`); layout en `Chatly/components/auth_layout.py`.
+- **README actualizado**: funcionalidades sociales que faltaban (intereses y sugerencias de personas, grupos descubribles y solicitudes) + configuración de arranque (tres URLs de BD, `alembic upgrade head`, SMTP y Redirect URL `/auth/confirm`, puertos 3000/8000, comandos de test y lint).
 
 ## Diseño social cerrado (docs)
 - `GET /api/interests` **público** (el registro no tiene sesión); el resto de endpoints sociales exige verificado.
@@ -33,6 +35,8 @@ Memoria del proyecto entre sesiones de agente. Máximo ~50 líneas.
 - `load_interests()` es un evento de servidor que llama al repositorio: el catálogo no necesita cookies (la regla de `fetch` aplica a lo que fija sesión).
 - Estado de la UI con dataclasses (`InterestCategory`/`InterestItem`): `rx.foreach` anidado exige tipos declarados.
 - Login/logout/refresh vía fetch HTTP (cookies HttpOnly); login recarga completa.
+- **Asistente de registro**: `AuthState.register_step` (1..5) + `next_step`/`prev_step`/`reset_register`; la validación por paso reutiliza los validadores existentes (`validate_register`, `password_is_strong`, regex de alias/correo, edad 18–120). Si el backend rechaza un campo, se vuelve al paso que lo contiene (`_ERROR_STEP`).
+- **Los errores por campo son vars sueltas** (`error_email`, `error_alias`, …), no un dict: leer `state.dict["clave"]` en el cliente devuelve `undefined` si la clave no existe y el mensaje no se pinta.
 
 ## Aprendizajes y errores a evitar
 - **`rx.call_script` evalúa el código con `eval`**: debe ser una EXPRESIÓN (`(async () => {...})()`). Si es solo la función, el callback recibe un valor no serializable y el servidor recibe el payload vacío (`TypeError: ... missing 1 required positional argument`).
@@ -45,12 +49,13 @@ Memoria del proyecto entre sesiones de agente. Máximo ~50 líneas.
 - En Windows, `alembic upgrade --sql` con emojis falla con `UnicodeEncodeError` cp1252; usar `PYTHONIOENCODING=utf-8`.
 - `create or replace view` no puede quitar columnas: en el `downgrade` hay que `drop view` y recrearla.
 - `insert … select` con lista de UUID: pasar `cast(:ids as uuid[])` y `returning` para contar lo insertado.
+- **El navegador bloquea el `submit` del formulario**: un `input type="email"` con valor inválido impide el envío (validación HTML5) y, con el botón de envío deshabilitado, la tecla Enter tampoco dispara el evento. Por eso los formularios de auth van con `no_validate=True` y el botón «Siguiente» nunca se deshabilita: valida al pulsar y muestra el error bajo el campo.
+- **En Windows, el worker de granian muere al recargar** (`ModuleNotFoundError: No module named 'fastapi'`): el backend queda caído y los eventos por WebSocket dejan de llegar (parece un bug de estado). Reiniciar `uv run reflex run` y recargar la página.
 
 ## Próximos pasos
-- Probar alta con correo real (Brevo + plantilla Supabase) y Redirect URL `/auth/confirm`.
+- Probar alta con correo real (Brevo + plantilla Supabase) y Redirect URL `/auth/confirm`; usar una cuenta de prueba y limpiarla.
 - Revisión de la migración y su RLS por dos integrantes (pendiente, regla de AGENTS.md).
-- Verificado en local con Windows: `/api/health`, `/api/interests` y el bloque de intereses de `/register` responden con granian + winloop.
-- Falta el envío real del formulario con correo (crea usuario en Supabase y envía email); hacerlo con una cuenta de prueba y limpiarla.
 - Middleware de rate limit (§14) y endpoints sociales pendientes.
 - Continuar con `0006`–`0012` y cerrar con `0013`/`0014`; revisar RLS/grants con `supabase db advisors`.
 - Al desplegar: `API_PUBLIC_URL`, `CORS_ORIGINS` y variables de pool.
+- Las referencias de diseño están en **`docs/ux-ui/`** (fuera de `assets/`, para que no se copien al build); `assets/` solo lleva lo que la app sirve (`auth.css`, `favicon.ico`, `icons/`, `js/`).

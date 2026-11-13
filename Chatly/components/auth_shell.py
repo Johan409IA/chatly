@@ -88,16 +88,16 @@ def field_label(text: str) -> rx.Component:
     return rx.text(text, size="2", weight="medium", width="100%")
 
 
-def field_error(field: str) -> rx.Component:
-    """Mensaje de error bajo un campo; solo se muestra con la clave dada.
+def field_error(message: rx.Var[str]) -> rx.Component:
+    """Mensaje de error bajo un campo; solo se muestra si el mensaje no está vacío.
 
-    `field` es la clave literal del dict `AuthState.field_errors`,
-    por ejemplo «email» o «password».
+    `message` es la var de estado con el texto del error (por ejemplo
+    `AuthState.error_email`).
     """
     return rx.cond(
-        AuthState.field_errors[field] != "",
+        message != "",
         rx.text(
-            AuthState.field_errors[field],
+            message,
             size="1",
             color_scheme="red",
         ),
