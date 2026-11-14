@@ -227,7 +227,7 @@ Se conserva el calendario base y la fecha de entrega. La funcionalidad social se
 - [x] Establecer un máximo de 10 intereses por usuario. <!-- validación 422 interest_limit_exceeded -->
 - [x] Añadir la configuración `visibilidad_publica` al perfil, activada por defecto e independiente de la visibilidad de los grupos. <!-- columna en 0005b_intereses; la UI llega con 0013 -->
 - [x] Permitir seleccionar intereses durante el registro, sin obligar al usuario a elegir ninguno. <!-- bloque opcional en /register -->
-- [x] Presentar las categorías de forma expandible y los intereses concretos como etiquetas seleccionables. <!-- accordion por categoría con contador N/10 -->
+- [ ] Presentar las categorías de forma expandible y los intereses concretos como etiquetas seleccionables. <!-- accordion por categoría con contador N/10 -->
 - [ ] Permitir modificar los intereses desde el perfil y mostrar el límite de selección (por ejemplo, `3/10`). <!-- requiere PUT /api/me/interests -->
 - [ ] Permitir desactivar/activar la visibilidad pública desde los ajustes.
 - [ ] Definir las respuestas del perfil público: mostrar todos los intereses únicamente cuando la visibilidad pública esté activada; ocultarlos cuando esté desactivada.
