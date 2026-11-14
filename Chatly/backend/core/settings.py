@@ -19,11 +19,19 @@ class Settings(BaseSettings):
 
     app_env: Literal["development", "test", "production"] = "development"
     database_url: str
+    app_database_url: str | None = None
     test_database_url: str | None = None
     supabase_url: str
     supabase_publishable_key: str
     supabase_jwks_url: str
     supabase_avatars_bucket: str = "avatars"
+    jwt_leeway_seconds: int = 30
+
+    # Frontend y API viven en puertos distintos en desarrollo. El navegador
+    # necesita la URL absoluta del API y CORS con credenciales.
+    frontend_url: str = "http://localhost:3000"
+    api_public_url: str = "http://localhost:8000"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     db_pool_size: int = 5
     db_max_overflow: int = 10
@@ -32,7 +40,12 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
-    @field_validator("database_url", "test_database_url")
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Orígenes permitidos para el navegador (lista separada por comas)."""
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @field_validator("database_url", "app_database_url", "test_database_url")
     @classmethod
     def _check_driver(cls, value: str | None) -> str | None:
         if value is not None and not value.startswith("postgresql+psycopg://"):

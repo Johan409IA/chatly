@@ -1,4 +1,5 @@
 <!-- reflex managed begin (do not edit inside this block; add custom content outside the markers) -->
+
 # Agents
 
 This project uses the **Reflex agent skills** � up-to-date knowledge for building full-stack Python web apps with [Reflex](https://reflex.dev). Install them first, then use them as described below.
@@ -24,7 +25,7 @@ Newly installed plugins load on the next session. After installing, tell the use
 npx skills add reflex-dev/agent-skills
 ```
 
-Or clone https://github.com/reflex-dev/agent-skills and copy the `skills/` folders into your agent's skill directory (see the repo README for paths).
+Or clone [https://github.com/reflex-dev/agent-skills](https://github.com/reflex-dev/agent-skills) and copy the `skills/` folders into your agent's skill directory (see the repo README for paths).
 
 ### Verifying
 
@@ -53,6 +54,7 @@ Then proceed with the user's request.
 ### Managing a Reflex process
 
 When you need to compile, run, reload, or debug a Reflex application, follow the **reflex-process-management** skill for the correct sequence and error investigation steps.
+
 <!-- reflex managed end -->
 
 # AGENTS.md — Chatly
@@ -60,25 +62,32 @@ When you need to compile, run, reload, or debug a Reflex application, follow the
 Chatly: app web responsive de mensajería (español) con chats privados/grupales y encuestas, instalable como PWA. V1 sin CI/CD ni protección de rama.
 
 ## Stack y estructura
+
 - Python 3.13.7 + uv; Reflex (full-stack) + FastAPI integrado; SQLAlchemy 2 async, Psycopg 3, Alembic, Pydantic 2, Pydantic Settings, PyJWT; Supabase (Auth/PostgreSQL/Realtime/Storage).
 - App Reflex en `Chatly/` (`pages`, `components`, `state`, `backend/{api,services,repositories,database,core,integrations}`); tests en `tests/unit`; docs en `docs/`; migraciones en `migrations/`.
 
 ## Comandos
+
 - `uv sync` · `uv run reflex run` (UI :3000, API :8000) · `uv run pytest` · `uv run ruff check .` · `uv run ruff format .` · `uv run alembic upgrade head`
 
 ## Convenciones
+
 - UI y mensajes en español. Conventional Commits. Ruff: line-length 100, target py312. Identidad del usuario se deriva siempre del JWT, nunca de un `user_id` del cliente. RLS por transacción (rol sin BYPASSRLS).
 
 ## Reglas de dominio / trampas
+
 - Un solo backend Reflex (no segundo FastAPI). Sin Redis (una instancia). Sin CI/CD en GitHub. `bunfig.toml` usa espejo npmmirror por bloqueo de red a npmjs.org. No editar el bloque "reflex managed" de este archivo.
 
 ## Forma de trabajar
+
 - Planificar antes de cambios grandes; ramas `feature/*` → `develop` → `main`; migraciones y RLS revisadas por dos integrantes.
 - Al terminar cada tarea, actualizar `MEMORY.md` con estado, decisiones y errores a evitar. Mantenerlo breve (~50 líneas). Proponer mover reglas permanentes a este archivo.
 - Usar nombres en español para las tablas y campos de la base de datos, y para los modelos Pydantic y SQLAlchemy. Usar nombres en inglés para las clases de Python, funciones, variables y métodos.
 - Usar playwright cli para pruebas end-to-end (E2E) de la UI. No usar Selenium ni Cypress, cuando sea necesario.
+- Usa context7-cli para consultar la documentación de las tecnologías que vas a usar y tienes alguna duda, puedes usar su skill también y la de find-docs. Asi para que no tengas que consultar desde la web. Usa el comando ctx7 no el de npx.
 
 ## Memoria
+
 - Al empezar, lee `MEMORY.md` para conocer el estado del proyecto y las decisiones tomadas.
 - Al terminar una tarea, actualízalo: estado actual, decisiones importantes (con su porqué) y errores a evitar.
 - Mantenlo breve (máximo ~50 líneas): resume o elimina lo que ya no aporte.
@@ -86,9 +95,11 @@ Chatly: app web responsive de mensajería (español) con chats privados/grupales
 - No guardes nunca datos sensibles (claves, tokens, datos personales).
 
 ## Límites
+
 - ✅ Siempre: actualizar `MEMORY.md` al terminar cada tarea; verificar JWT y RLS.
 - ⚠️ Pregunta antes: dependencias nuevas, archivos nuevos, cambios en formato de datos.
 - 🚫 Nunca: secretos en Git, saltarse RLS, editar el bloque reflex managed, hacer commit y push.
 
 ## Verificación
+
 - `uv run pytest` y `uv run ruff check .` pasan; `uv run reflex run` abre; `/api/health` responde `{"status":"ok"}`.

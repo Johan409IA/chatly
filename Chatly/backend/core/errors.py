@@ -40,6 +40,7 @@ class ErrorCode(StrEnum):
     POLL_HAS_VOTES = "poll_has_votes"
     MESSAGE_TOO_LONG = "message_too_long"
     INVALID_AVATAR = "invalid_avatar"
+    INTEREST_LIMIT_EXCEEDED = "interest_limit_exceeded"
     DUPLICATE_REQUEST = "duplicate_request"
     RATE_LIMITED = "rate_limited"
     INTERNAL_ERROR = "internal_error"

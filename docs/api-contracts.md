@@ -1,8 +1,8 @@
 # Chatly — Contratos de API
 
-> **Estado:** propuesta para revisión del equipo.
+> **Estado:** aprobado para implementación; contrato cerrado. La implementación avanza por migraciones y endpoints; no implica que todo esté desplegado.
 > **Implementación:** FastAPI integrado en Reflex mediante `api_transformer`. Un solo servidor.
-> **Base:** Q1–Q112, `docs/database-schema.md`, `docs/authorization-matrix.md` y `docs/realtime-events.md`.
+> **Base:** decisiones funcionales Q1–Q179 consolidadas en `docs/chatly.md`, `docs/database-schema.md`, `docs/authorization-matrix.md` y `docs/realtime-events.md`.
 > **Regla de oro:** la identidad del actor sale siempre del JWT/cookie de sesión. Ningún cuerpo acepta `user_id` como identidad.
 
 ---
@@ -61,7 +61,13 @@
 | `poll_has_votes` | 422 | Eliminar encuesta con votos (Q93) |
 | `message_too_long` | 422 | Más de 4.000 caracteres (Q51) |
 | `invalid_avatar` | 422 | Formato, tamaño o ruta inválidos (Q18) |
-| `duplicate_request` | 200 | Reintento idempotente; se devuelve el recurso existente |
+| `interest_limit_exceeded` | 422 | Más de 10 intereses personales o más de 5 intereses de grupo (Q124, Q121) |
+| `pending_join_request_exists` | 409 | El usuario ya tiene una solicitud pendiente global (Q151, Q159) |
+| `join_request_cooldown` | 409 | Rechazo manual del mismo grupo hace menos de 7 días (Q129, Q169) |
+| `join_request_not_pending` | 409 | La solicitud ya fue resuelta o expiró |
+| `group_not_discoverable` | 404 | El grupo no está publicado o dejó de ser descubrible |
+| `group_full` | 409 | Al crear una solicitud, el grupo ya alcanzó los 10 integrantes (Q123, Q176). Aceptar una solicitud en un grupo completo responde `200` con la solicitud en `rejected` y motivo `group_full`. |
+| `invalid_discovery_profile` | 422 | Descripción o intereses requeridos para publicar un grupo (Q134) |
 | `rate_limited` | 429 | Se superó un límite de frecuencia (ver §14) |
 | `internal_error` | 500 | Error no controlado |
 
@@ -89,11 +95,15 @@
   "display_name": "Johan Castillón",
   "avatar_url": "https://...",
   "age": 23,
-  "gender": "masculino"
+  "gender": "masculino",
+  "is_public": true,
+  "interests": [
+    { "id": "...", "name": "Programación", "category": "Tecnología" }
+  ]
 }
 ```
 
-Reglas: `age` derivada de `birth_date`; `birth_date` **no** aparece aquí. Visible para usuarios autenticados y verificados (Q109, Q110).
+Reglas: `age` se deriva de `birth_date`; `birth_date` **no** aparece aquí. Visible para usuarios autenticados y verificados (Q109, Q110). `interests` contiene todos los intereses solo cuando `is_public = true`; con visibilidad desactivada se devuelve como lista vacía. El nombre, alias y fotografía siguen disponibles mediante búsqueda directa (Q120, Q139).
 
 ### 3.3 `ProfileMe`
 
@@ -110,6 +120,10 @@ Reglas: `age` derivada de `birth_date`; `birth_date` **no** aparece aquí. Visib
   "gender": "masculino",
   "alias_changed_at": "2026-10-01T12:00:00Z",
   "can_change_alias": true,
+  "is_public": true,
+  "interests": [
+    { "id": "...", "name": "Programación", "category": "Tecnología" }
+  ],
   "created_at": "2026-11-01T10:00:00Z"
 }
 ```
@@ -172,7 +186,9 @@ Reglas: `age` derivada de `birth_date`; `birth_date` **no** aparece aquí. Visib
   "unread_count": 3,
   "is_archived": false,
   "my_role": "admin",
-  "members_count": 5
+  "members_count": 5,
+  "is_discoverable": false,
+  "description": null
 }
 ```
 
@@ -191,7 +207,8 @@ Público. Crea la cuenta en Supabase Auth y el perfil en una transacción lógic
   "alias": "johan_dev",
   "display_name": "Johan Castillón",
   "birth_date": "2003-04-18",
-  "gender": "masculino"
+  "gender": "masculino",
+  "interest_ids": []
 }
 ```
 
@@ -205,6 +222,7 @@ Validaciones:
 | `display_name` | 2–60, obligatorio, no único (Q111) |
 | `birth_date` | Fecha válida; edad 18–120 (Q109) |
 | `gender` | `femenino` o `masculino` (Q110) |
+| `interest_ids` | Opcional; entre 0 y 10 IDs del catálogo. Si se omite o se envía vacío, el usuario termina el registro sin intereses (Q117, Q124, Q178). |
 
 La política de contraseñas se configura en Supabase Auth: longitud mínima 8, requisitos de mayúscula, minúscula y símbolo. No se exige número; si el usuario lo incluye, se acepta. La misma política aplica a la recuperación de contraseña.
 
@@ -220,7 +238,7 @@ Respuesta `201`:
 
 Errores: `email_already_registered`, `alias_taken`, `validation_error`.
 
-> El registro no inicia sesión de chat: el correo debe confirmarse primero (Q15).
+> El registro no inicia sesión de chat: el correo debe confirmarse primero (Q15). La selección de intereses es opcional; también puede completarse después desde el perfil.
 
 ### 4.2 `POST /api/auth/login`
 
@@ -281,10 +299,15 @@ Respuesta `202` siempre. El correo lleva el enlace de recuperación de Supabase.
 ### 4.7 `POST /api/auth/reset-password`
 
 ```json
-{ "token": "token-de-recuperacion", "password": "********" }
+{ "token_hash": "token_hash-del-enlace", "password": "********" }
 ```
 
-Respuesta `204`. Se aplica la misma política de contraseñas del registro. Errores: `401 unauthorized`, `422 weak_password`, `validation_error`.
+Respuesta `204`. El `token_hash` viene del enlace de la plantilla de
+recuperación (`{{ .SiteURL }}/reset-password?token_hash={{ .TokenHash }}&type=recovery`);
+el backend lo canjea por una sesión de recuperación (`POST /auth/v1/verify` con
+`type=recovery`) y cambia la contraseña con su access token, por lo que no se
+pide la contraseña actual. Se aplica la misma política de contraseñas del
+registro. Errores: `401 unauthorized`, `422 weak_password`, `validation_error`.
 
 ---
 
@@ -303,7 +326,8 @@ Actualiza campos permitidos. Todos opcionales, pero al menos uno.
   "display_name": "Johan C.",
   "alias": "johan_c",
   "birth_date": "2003-04-18",
-  "gender": "masculino"
+  "gender": "masculino",
+  "is_public": true
 }
 ```
 
@@ -313,9 +337,11 @@ Actualiza campos permitidos. Todos opcionales, pero al menos uno.
 | `alias` | 3–20, formato de Q57, único, 1 cambio/30 días (Q107) |
 | `birth_date` | Edad 18–120 (Q109) |
 | `gender` | `femenino` o `masculino` (Q110) |
+| `is_public` | Booleano; valor inicial `true`. Controla recomendaciones de personas y visibilidad de intereses, no la publicación de grupos (Q116, Q139). |
 
 - Cada cambio se audita (Q43).
 - Respuesta `200` con `ProfileMe`.
+- Para reemplazar los intereses se utiliza `PUT /api/me/interests` (sección 16).
 - Errores: `alias_taken`, `alias_change_too_soon`, `validation_error`.
 
 ### 5.3 `POST /api/me/avatar`
@@ -330,7 +356,7 @@ Flujo:
 
 1. El navegador sube el archivo a `avatars/{user_id}/{uuid}.{ext}` con `supabase-js` y el JWT del usuario.
 2. El bucket aplica límite de 2 MB y tipos JPEG/PNG/WebP (Q18).
-3. El backend hace `HEAD` del objeto, verifica tipo y tamaño, y actualiza `profiles.avatar_path`.
+3. El backend hace `HEAD` del objeto, verifica tipo y tamaño, y actualiza `perfiles.ruta_avatar`.
 4. El archivo anterior se conserva en Storage; solo cambia la referencia vigente (Q80).
 5. Respuesta `200` con `{ "avatar_url": "..." }` (URL firmada con **10 minutos** de vigencia).
 
@@ -342,7 +368,7 @@ Elimina la referencia vigente y vuelve al avatar predeterminado. El archivo se c
 
 ### 5.5 `GET /api/profiles/{user_id}`
 
-Devuelve `ProfilePublic`. No incluye correo ni fecha de nacimiento. `404` si no existe o está borrado.
+Devuelve `ProfilePublic`. No incluye correo ni fecha de nacimiento. Si `is_public = false`, mantiene nombre, alias y fotografía, pero no revela intereses. `404` si no existe o está borrado.
 
 ---
 
@@ -359,6 +385,7 @@ Parámetros mutuamente excluyentes:
 
 - Excluye al propio usuario (Q112).
 - Requiere usuario autenticado y verificado.
+- La búsqueda directa sigue disponible aunque el usuario encontrado tenga `is_public = false`; esta preferencia solo controla las recomendaciones y la visibilidad de sus intereses (Q120, Q139).
 - Devuelve como máximo **20** resultados (confirmado).
 
 Respuesta `200`:
@@ -392,13 +419,37 @@ Respuesta:
 
 ### 7.2 `POST /api/conversations/direct`
 
+Prepara o abre el chat con otra persona. No crea por sí solo una conversación persistente.
+
 ```json
-{ "user_id": "0f8c2a4e-..." }
+{ "recipient_id": "0f8c2a4e-..." }
 ```
 
-- Si ya existe la conversación privada de la pareja, devuelve `200` con la existente (Q20).
-- Si no, `201`.
-- Errores: `not_found`, `forbidden` (usuario no verificado).
+- Si ya existe la conversación privada de la pareja, devuelve `200` con la conversación existente (Q20).
+- Si todavía no existe, devuelve `200` con un chat temporal (`conversation_id: null`, `is_temporary: true`) y los datos básicos del destinatario. No se inserta ninguna fila en `conversaciones` ni `miembros_conversacion`.
+- La conversación y las membresías se crean de forma atómica cuando se envía el primer mensaje mediante `POST /api/messages/direct` (Q146).
+- El actor siempre se obtiene de la sesión; `recipient_id` identifica al destinatario, no al actor.
+- Errores: `not_found` (destinatario inexistente), `forbidden` (destinatario no verificado) y `validation_error` (el actor se envía a sí mismo como destinatario).
+
+### 7.2.1 `POST /api/messages/direct`
+
+Envía el primer mensaje a una persona con la que todavía no existe una conversación persistida, o reutiliza la conversación privada si ya existe.
+
+```json
+{
+  "recipient_id": "0f8c2a4e-...",
+  "content": "Hola, vi que compartimos interés en programación.",
+  "client_message_id": "3f2a1b0c-..."
+}
+```
+
+- `recipient_id` es el destinatario; el actor se obtiene del JWT/cookie.
+- `content`: 1–4.000 caracteres (Q51).
+- `client_message_id`: UUID para evitar duplicados ante reintentos (Q40).
+- La operación busca una conversación única para la pareja; si no existe, crea la conversación directa, las dos membresías y el primer mensaje dentro de una misma transacción (Q20, Q146).
+- Si ya existe la conversación, reutiliza su ID y añade el mensaje.
+- Respuesta `201` cuando se crea la conversación; `200` cuando se reutiliza una existente o se devuelve un reintento idempotente.
+- Errores: `not_found`, `forbidden`, `message_too_long`, `validation_error`.
 
 ### 7.3 `POST /api/conversations/groups`
 
@@ -416,6 +467,8 @@ Respuesta:
 | Máximo | 10 integrantes incluyendo al creador (Q8) |
 | Administrador | El creador (Q8) |
 
+Los grupos se crean privados por defecto (`is_discoverable = false`). La descripción y los intereses para descubrimiento se configuran después desde el endpoint de descubribilidad (sección 16).
+
 Respuesta `201` con el detalle de la conversación.
 Errores: `validation_error`, `conversation_full`, `not_found`.
 
@@ -430,6 +483,11 @@ Detalle con integrantes, roles, administrador actual, estado de archivo y mi mem
   "name": "Equipo de tesis",
   "admin_id": "...",
   "is_archived": false,
+  "is_discoverable": true,
+  "description": "Espacio para aprender y compartir conocimientos.",
+  "interests": [
+    { "id": "...", "name": "Programación", "category": "Tecnología" }
+  ],
   "created_at": "...",
   "members": [
     { "user": { /* UserSummary */ }, "role": "admin", "joined_at": "...", "active": true },
@@ -453,7 +511,13 @@ Solo el administrador activo (Q46). Reglas de nombre de Q87. Respuesta `200` con
 { "user_id": "..." }
 ```
 
-Solo administrador activo (Q81). Respuesta `201` con la membresía creada. Errores: `already_member` (Q86), `conversation_full` (Q8), `not_found`.
+Solo administrador activo (Q81). Respuesta `201` con la membresía creada. Además, dentro de la misma transacción:
+
+- Si existe una solicitud pendiente del usuario para **este mismo grupo**, se marca como aceptada y se crea una sola membresía (Q144).
+- Si existe una solicitud pendiente para **otro grupo**, se rechaza automáticamente para conservar el límite global de una solicitud pendiente (Q166).
+- Si el grupo alcanza diez integrantes, las demás solicitudes pendientes para ese grupo se rechazan automáticamente por grupo completo (Q130).
+
+Errores: `already_member` (Q86), `conversation_full` (Q8), `not_found`.
 
 ### 7.7 `DELETE /api/conversations/{id}/members/{user_id}`
 
@@ -705,7 +769,14 @@ Público.
 | Opciones | 2–5, texto 1–80, sin duplicados | Q88 |
 | Reacciones | 7 emojis, una vigente | Q12 |
 | Avatar | JPEG/PNG/WebP, 2 MB | Q18 |
-| Paginación | 50 inicial, 30 anteriores | Q94 |
+| Paginación de mensajes | 50 inicial, 30 anteriores | Q94 |
+| Intereses personales | 0–10; vacío permitido | Q117, Q124 |
+| Intereses de grupo descubrible | 1–5 | Q121, Q134, Q178 |
+| Descripción de grupo descubrible | 10–300 caracteres | Q134 |
+| Integrantes de grupo | máximo 10; incluye creador | Q8 |
+| Solicitud pendiente | máximo 1 global por usuario | Q151, Q159 |
+| Caducidad de solicitud | 14 días | Q160 |
+| Espera tras rechazo manual | 7 días para el mismo grupo | Q129, Q147, Q169 |
 
 ---
 
@@ -721,7 +792,8 @@ Público.
 | Actualizar perfil | 200 | 401, 409, 422 |
 | Buscar usuarios | 200 | 401, 403, 422 |
 | Listar conversaciones | 200 | 401, 403 |
-| Crear directa | 200/201 | 401, 403, 404 |
+| Preparar chat directo | 200 | 401, 403, 404 |
+| Enviar primer mensaje directo | 200/201 | 401, 403, 404, 422 |
 | Crear grupo | 201 | 401, 403, 422 |
 | Detalle de conversación | 200 | 401, 404 |
 | Añadir/expulsar | 201/204 | 401, 403, 404, 409, 422 |
@@ -733,6 +805,15 @@ Público.
 | Crear encuesta | 201 | 401, 403, 404, 422 |
 | Votar | 200 | 401, 403, 404, 422 |
 | Cerrar/eliminar encuesta | 200/204 | 401, 403, 404, 422 |
+| Catálogo de intereses (público) | 200 | — |
+| Actualizar intereses propios | 200 | 401, 403, 422 |
+| Recomendaciones de personas/grupos | 200 | 401, 403, 422, 429 |
+| Buscar/detallar grupo descubrible | 200 | 401, 403, 404, 422, 429 |
+| Configurar descubribilidad | 200 | 401, 403, 404, 422 |
+| Crear solicitud de unión | 201 | 401, 403, 404, 409, 422, 429 |
+| Consultar solicitud pendiente propia | 200 | 401, 403 |
+| Listar solicitudes del grupo | 200 | 401, 403, 404 |
+| Aceptar/rechazar solicitud | 200 | 401, 403, 404, 409 |
 
 ---
 
@@ -746,6 +827,10 @@ Público.
 6. **Logs:** sin tokens, cookies, contraseñas ni contenido de mensajes.
 7. **Errores:** mensajes en español, sin trazas ni detalles internos.
 8. **Límites de tamaño:** validados en Pydantic y en `check` de la base.
+9. **Descubrimiento:** solo usuarios autenticados y verificados acceden a personas y grupos descubribles. El catálogo de intereses es público y no expone datos personales. Las tarjetas de personas no exponen alias ni cantidad de coincidencias; solo intereses compartidos.
+10. **Privacidad social:** `is_public` controla recomendaciones de personas e intereses del perfil; no cambia la visibilidad de los grupos que administra. `is_discoverable` es independiente y solo lo modifica el administrador del grupo.
+11. **Solicitudes:** el actor siempre se deriva de la sesión. El `user_id` del solicitante nunca se acepta desde el cuerpo; la solicitud se atribuye al usuario autenticado.
+12. **Datos de grupos:** ningún endpoint de descubrimiento devuelve lista de integrantes ni mensajes de un grupo a usuarios externos.
 
 ---
 
@@ -759,10 +844,14 @@ Se aplican en la capa HTTP (FastAPI) y en memoria del proceso. Al ser una sola i
 | Reenvío de verificación | 3 / 15 min | IP + correo |
 | Recuperación de contraseña | 3 / 15 min | IP + correo |
 | Búsqueda de usuarios | 30 / min | usuario autenticado |
+| Descubrir personas, grupos, búsqueda y detalle | 30 / min | usuario verificado |
+| Crear solicitud de unión | 10 / min | usuario verificado |
+| Consultar la solicitud pendiente propia | 60 / min | usuario verificado |
 | Envío de mensajes | 30 / min | usuario autenticado |
 | Reacciones | 60 / min | usuario autenticado |
 
 - Al exceder: `429 rate_limited` con cabecera `Retry-After` en segundos.
+- Los límites de Descubrir evitan recorrer toda la población pública verificada mediante paginación. Se aplican por usuario después de verificar el JWT. El catálogo de intereses es público y cacheable; no necesita límite por usuario.
 - Los límites por usuario se aplican después de verificar el JWT; los de autenticación, antes.
 - Detrás de Render, la IP se toma de `X-Forwarded-For` con `trusted_proxy_hops = 1`. No se confía en la cabecera si no hay proxy.
 - Supabase Auth mantiene sus propios límites; los de la aplicación son complementarios.
@@ -780,3 +869,326 @@ Se aplican en la capa HTTP (FastAPI) y en memoria del proceso. Al ser una sola i
 4. **OpenAPI/Swagger:** sin documentación de API por ahora; `docs_url`, `redoc_url` y `openapi_url` deshabilitados en todos los entornos.
 5. **Mensajes de error:** claros y directos, en segunda persona, con acción concreta y `details.field` cuando aplique.
 6. **Búsqueda de usuarios:** máximo 20 resultados.
+
+
+---
+
+## 16. Descubrimiento social, intereses y solicitudes de unión (Q113–Q179)
+
+Esta sección extiende los contratos existentes sin crear un segundo tipo de conversación ni un sistema de amistades. Las personas se conectan mediante chats privados y las comunidades reutilizan las conversaciones grupales existentes.
+
+### 16.1 DTOs sociales
+
+#### `InterestCategory`
+
+```json
+{
+  "id": "...",
+  "name": "Tecnología",
+  "interests": [
+    { "id": "...", "name": "Programación" },
+    { "id": "...", "name": "Inteligencia artificial" }
+  ]
+}
+```
+
+Las categorías sirven para organizar la selección; el usuario selecciona intereses concretos, no categorías completas (Q163, Q178).
+
+#### `PersonRecommendation`
+
+```json
+{
+  "id": "...",
+  "display_name": "Ana Martínez",
+  "avatar_url": "https://...",
+  "shared_interests": [
+    { "id": "...", "name": "Programación" },
+    { "id": "...", "name": "Python" }
+  ]
+}
+```
+
+La tarjeta no muestra `alias` ni un contador o etiqueta de cantidad de coincidencias; muestra únicamente los intereses compartidos. El estado online no viene en esta respuesta: el cliente lo calcula suscribiéndose a `presence:user:<id>` cuando el perfil es público (Q119, Q173; realtime-events §3.2 y §6). Al seleccionar la tarjeta, el cliente abre o reutiliza el chat directo. La conversación se persiste al enviar el primer mensaje (Q146).
+
+#### `DiscoverableGroupSummary`
+
+```json
+{
+  "id": "...",
+  "name": "Comunidad de programación",
+  "description": "Espacio para aprender y compartir conocimientos.",
+  "interests": [
+    { "id": "...", "name": "Programación" },
+    { "id": "...", "name": "Python" }
+  ],
+  "members_count": 8,
+  "available_places": 2,
+  "is_full": false,
+  "my_request_status": null,
+  "can_request_to_join": true
+}
+```
+
+No incluye lista de integrantes, perfiles de integrantes ni mensajes (Q132). Un grupo completo sigue apareciendo, con `is_full = true` y `can_request_to_join = false` (Q123). `my_request_status` se refiere únicamente a este grupo; una solicitud pendiente en otro grupo no aparece aquí, pero deshabilita `can_request_to_join` en todos (Q159). El servidor evalúa esa condición una vez por consulta y el cliente puede contrastarla con `GET /api/me/join-request`.
+
+#### `JoinRequest`
+
+```json
+{
+  "id": "...",
+  "group_id": "...",
+  "group_name": "Comunidad de programación",
+  "status": "pending",
+  "created_at": "2026-11-01T18:00:00Z",
+  "expires_at": "2026-11-15T18:00:00Z",
+  "resolved_at": null
+}
+```
+
+Estados permitidos: `pending`, `accepted`, `rejected` y `expired`. No existe `cancelled`: el solicitante no puede cancelar (Q122, Q160). No hay DTO ni endpoint para consultar un historial «Mis solicitudes» (Q177).
+
+#### `AdminJoinRequestItem`
+
+```json
+{
+  "id": "...",
+  "group_id": "...",
+  "requester": {
+    "id": "...",
+    "display_name": "Ana Martínez",
+    "alias": "ana_ml",
+    "avatar_url": "https://..."
+  },
+  "shared_interests": [
+    { "id": "...", "name": "Programación" }
+  ],
+  "created_at": "2026-11-01T18:00:00Z",
+  "expires_at": "2026-11-15T18:00:00Z"
+}
+```
+
+Es el elemento de la bandeja del administrador. Incluye solo fotografía, nombre visible, alias, intereses compartidos con el grupo y fecha de solicitud (Q157); nunca el correo. `shared_interests` se obtiene con `app.shared_interests_for_join_request(uuid)` y no vuelve público el perfil del solicitante.
+
+### 16.2 Catálogo y selección de intereses
+
+#### `GET /api/interests`
+
+Devuelve las categorías activas y sus intereses, ordenados por el campo de orden del catálogo. Es **público**: el registro lo consume antes de que exista sesión, porque el login está bloqueado hasta confirmar el correo (Q15). Se sirve con `Cache-Control: public, max-age=3600`. Es el único endpoint social público; personas, grupos, perfiles y solicitudes siguen exigiendo usuario verificado (Q128).
+
+Respuesta `200`: lista de `InterestCategory`.
+
+El catálogo es predefinido y se mantiene mediante los datos de la aplicación; los usuarios no pueden crear intereses personalizados ni editar categorías (Q149). Durante el registro puede enviarse `interest_ids` opcional; posteriormente se reemplazan con el endpoint siguiente.
+
+#### `PUT /api/me/interests`
+
+Reemplaza la selección completa de intereses del usuario autenticado.
+
+```json
+{
+  "interest_ids": ["uuid-interes-1", "uuid-interes-2"]
+}
+```
+
+- Se permiten entre 0 y 10 intereses. El arreglo vacío equivale a omitir la selección (Q117, Q124).
+- Solo se aceptan IDs activos que existan en el catálogo.
+- No se aceptan categorías como selección.
+- Se audita el cambio.
+- Las recomendaciones se recalculan al abrir Descubrir o actualizar resultados, no en cada modificación de la selección (Q164).
+
+Respuesta `200`: `ProfileMe` actualizado.
+Errores: `validation_error`, `interest_limit_exceeded`.
+
+### 16.3 Visibilidad del perfil
+
+`PATCH /api/me` acepta el campo `is_public`.
+
+- El valor predeterminado es `true` (Q116).
+- Con `true`, la persona puede aparecer en recomendaciones si tiene al menos un interés y se cumplen las demás condiciones; sus intereses se muestran en el perfil público (Q116, Q138).
+- Con `false`, desaparece de las recomendaciones y sus intereses dejan de mostrarse en el perfil. Nombre, fotografía y alias siguen disponibles por búsqueda directa (Q120, Q139).
+- La visibilidad personal no modifica la configuración de descubribilidad de los grupos administrados (Q165).
+
+### 16.4 Recomendaciones de personas
+
+#### `GET /api/discover/people`
+
+Parámetros:
+
+| Parámetro | Regla |
+|---|---|
+| `limit` | 20 por defecto y máximo 20 (Q148) |
+| `cursor` | Cursor opaco y firmado (HMAC con el secreto de la aplicación) que contiene la semilla y la última clave; el cliente no lo interpreta ni lo modifica |
+
+Respuesta `200`:
+
+```json
+{
+  "items": [ /* PersonRecommendation */ ],
+  "next_cursor": "opaque-cursor-or-null"
+}
+```
+
+Reglas de selección:
+
+1. El solicitante debe estar autenticado y verificado.
+2. Solo aparecen otros usuarios con visibilidad pública activa y al menos un interés seleccionado.
+3. Se requiere al menos un interés compartido; no es necesario que coincidan todos.
+4. Se excluyen usuarios con los que ya existe una conversación privada. Compartir un grupo no es motivo de exclusión (Q126, Q167).
+5. Se ordena por cantidad de intereses compartidos, de mayor a menor; los empates se ordenan por `md5(seed || ':' || id)` ascendente. La `seed` la genera el servidor en la primera página y se renueva al actualizar los resultados (Q118, Q125).
+6. El cursor contiene `seed`, `after_count`, `after_hash` y `after_id`; la página siguiente reutiliza la misma semilla y no vuelve a aleatorizar el orden. Un cursor alterado se rechaza con `validation_error` (Q125, Q148).
+7. Si el solicitante no tiene intereses, devuelve `items: []` y `next_cursor: null` sin bloquear el resto de Descubrir (Q140).
+8. Si un cambio de intereses elimina la coincidencia, la persona deja de aparecer al recalcular (Q172).
+
+No se incorpora un endpoint para descartar, seguir o enviar una solicitud de contacto a una persona. Al pulsar una tarjeta se abre el chat existente o se prepara uno temporal; la conversación nueva se crea al enviar el primer mensaje.
+
+### 16.5 Recomendaciones, búsqueda y detalle de grupos
+
+#### `GET /api/discover/groups`
+
+Parámetros `limit` (20 por defecto, máximo 20) y `cursor` (opaco y firmado).
+
+Devuelve `DiscoverableGroupSummary` ordenados por número de intereses coincidentes y con empates por `md5(seed || ':' || id)`, manteniendo el orden al paginar con el mismo esquema de cursor firmado que las personas (Q133, Q155, Q148).
+
+Reglas:
+
+- Solo grupos activos y descubribles.
+- Al menos un interés coincidente para aparecer en recomendaciones.
+- No recomendar grupos donde el usuario ya tenga una membresía activa ni grupos que administre (Q168).
+- Los grupos completos siguen apareciendo, pero no aceptan solicitudes (Q123).
+- Sin intereses personales, no se devuelven recomendaciones automáticas de grupos; el usuario conserva la búsqueda manual por nombre (Q140).
+- Los cambios de intereses del usuario o del grupo se reflejan al abrir o actualizar Descubrir (Q164, Q174).
+
+#### `GET /api/discover/groups/search?q=...`
+
+Parámetros:
+
+| Parámetro | Regla |
+|---|---|
+| `q` | Texto no vacío; búsqueda parcial por nombre. Las decisiones funcionales no fijaron una longitud mínima para esta búsqueda. |
+| `limit` | 20 por defecto y máximo 20 |
+| `cursor` | Cursor opaco para cargar la siguiente página |
+
+Búsqueda parcial por nombre y resultados progresivos.
+- Devuelve únicamente grupos descubribles; no requiere coincidencia de intereses y funciona aunque el usuario no haya seleccionado intereses (Q136, Q140, Q156).
+- No expone grupos privados ni la lista de integrantes o mensajes.
+- La búsqueda no se realiza por alias del administrador.
+
+#### `GET /api/discover/groups/{group_id}`
+
+Devuelve el detalle público del grupo: nombre, descripción, intereses, cantidad de integrantes, plazas disponibles, estado de grupo completo y estado de solicitud del actor si existe. No devuelve la lista de integrantes ni mensajes (Q132, Q135).
+
+Solo accesible para usuarios autenticados y verificados y mientras el grupo sea descubrible. Si deja de serlo, responde `404`.
+
+### 16.6 Configuración de descubribilidad de un grupo
+
+#### `PUT /api/conversations/{conversation_id}/discoverability`
+
+Solo el administrador actual de una conversación de tipo `group` puede utilizarlo (Q142).
+
+Para publicar o actualizar:
+
+```json
+{
+  "is_discoverable": true,
+  "description": "Espacio para aprender programación y compartir conocimientos.",
+  "interest_ids": ["uuid-interes-1", "uuid-interes-2"]
+}
+```
+
+- `description`: obligatorio al publicar; entre 10 y 300 caracteres (Q134).
+- `interest_ids`: entre 1 y 5 IDs del catálogo (Q121, Q174).
+- La visibilidad se activa solo si ambas condiciones se cumplen.
+- Los grupos son privados por defecto (Q131).
+- El administrador puede actualizar intereses y descripción en cualquier momento.
+
+Para volver a privado:
+
+```json
+{ "is_discoverable": false }
+```
+
+La operación desactiva la aparición en recomendaciones y búsquedas, conserva a los miembros, y rechaza automáticamente las solicitudes pendientes del grupo. Se notificará a sus solicitantes (Q137, Q143, Q175).
+
+Respuesta `200`: detalle del grupo actualizado.
+Errores: `not_found`, `forbidden`, `invalid_discovery_profile`, `validation_error`.
+
+### 16.7 Solicitudes para unirse
+
+#### `POST /api/discover/groups/{group_id}/join-requests`
+
+Crea una solicitud para el grupo indicado. No requiere coincidencia de intereses; sí requiere cuenta verificada (Q141).
+
+Respuesta `201`: `JoinRequest`.
+
+Validaciones y reglas:
+
+- El grupo debe existir, estar activo y ser descubrible; de lo contrario responde `404`.
+- El usuario no debe ser ya integrante ni administrador del grupo.
+- Solo puede existir una solicitud pendiente por usuario en toda Chatly (Q151, Q159). Si ya tiene una, responde `409 pending_join_request_exists`; puede seguir explorando, pero las demás acciones de solicitud quedan deshabilitadas.
+- No puede repetir una solicitud pendiente para el mismo grupo.
+- Tras un rechazo manual del mismo grupo, se aplica una espera de 7 días. El grupo sigue visible durante ese tiempo, pero no se puede volver a solicitar (Q129, Q147, Q169).
+- La salida voluntaria de un grupo no genera por sí misma espera de 7 días (Q145).
+- La solicitud vence a los 14 días (`expires_at = created_at + 14 days`) si no se resuelve (Q160).
+- No existe endpoint de cancelación.
+- La solicitud y sus cambios se conservan para auditoría, aunque no exista una pantalla de historial para el usuario.
+
+Errores: `group_not_discoverable`, `already_member`, `pending_join_request_exists`, `join_request_cooldown`, `group_full`, `validation_error`.
+
+#### `GET /api/me/join-request`
+
+Devuelve únicamente la solicitud pendiente actual del actor, o `null` si no tiene ninguna. No devuelve solicitudes resueltas ni un historial (Q159, Q177).
+
+#### `GET /api/conversations/{conversation_id}/join-requests`
+
+Solo administrador activo. Devuelve solicitudes pendientes de su grupo ordenadas de la más antigua a la más reciente (Q161, Q170, Q171).
+
+Devuelve `AdminJoinRequestItem[]`. Cada elemento incluye fotografía, nombre visible, alias, intereses compartidos y fecha de solicitud. No devuelve correo electrónico (Q157). Los intereses mostrados son únicamente los coincidentes con la temática del grupo y se revelan al administrador porque el usuario ha solicitado incorporarse; esto no vuelve público el perfil ni lo incorpora a recomendaciones de personas.
+
+#### `POST /api/conversations/{conversation_id}/join-requests/{request_id}/accept`
+
+Solo administrador activo.
+
+- Si la solicitud sigue pendiente, el grupo es descubrible y hay una plaza, el usuario se incorpora inmediatamente y comienza un nuevo periodo de membresía (Q153).
+- Si el solicitante ya había pertenecido al grupo, se aplica la regla histórica de Q162/Q158: recupera sus periodos anteriores y el nuevo, pero no los mensajes del intervalo fuera del grupo.
+- Si el grupo ya tiene 10 integrantes, se impide el ingreso y la solicitud se rechaza automáticamente por `group_full`; nunca se supera el límite (Q130, Q176).
+- Si la solicitud venció o dejó de estar pendiente, no se crea una membresía.
+
+Respuesta `200`:
+
+```json
+{
+  "request": { /* JoinRequest */ },
+  "membership": { "user_id": "...", "joined_at": "...", "role": "member" }
+}
+```
+
+`membership` es `null` si el grupo ya está completo. En ese caso la solicitud queda en `rejected` con motivo `group_full`; este endpoint no devuelve `409` en ese flujo.
+Errores: `join_request_not_pending`, `not_found`, `forbidden`.
+
+#### `POST /api/conversations/{conversation_id}/join-requests/{request_id}/reject`
+
+Solo administrador activo. No acepta motivo ni texto adicional (Q162, Q166).
+
+Marca la solicitud como `rejected`, registra el rechazo manual y activa la espera de siete días para ese mismo grupo (Q129, Q147, Q169).
+Respuesta `200`: `JoinRequest` actualizado.
+Errores: `join_request_not_pending`, `not_found`, `forbidden`.
+
+### 16.8 Transiciones automáticas y notificaciones visuales
+
+Las siguientes transiciones se ejecutan en la misma transacción que la operación que las provoca:
+
+| Evento | Transición |
+|---|---|
+| El administrador añade al solicitante al grupo solicitado | La solicitud pasa a `accepted`; se crea una sola membresía (Q144). |
+| Se añade al usuario a otro grupo | Su solicitud pendiente anterior se marca `rejected` automáticamente (Q166). |
+| El grupo alcanza 10 integrantes | Las demás solicitudes pendientes del grupo se marcan `rejected` por `group_full` (Q130). |
+| El administrador desactiva la descubribilidad | Las solicitudes pendientes del grupo se marcan `rejected` por `group_private` (Q137, Q143). |
+| Pasan 14 días sin respuesta | La solicitud pasa a `expired` y se libera el límite global (Q160). |
+| El administrador acepta/rechaza | Se registra el resultado correspondiente. |
+
+Las notificaciones serán avisos visuales internos: el administrador recibe un aviso al llegar una solicitud y el solicitante al resolverse o expirar (Q154, Q160). No se añaden notificaciones push ni una sección «Mis solicitudes» o historial (Q177). Los cambios de estado se emitirán como eventos Realtime para que la interfaz muestre el aviso; el estado definitivo permanece en `solicitudes_union`.
+
+**Ejecución de caducidad:** un job de `pg_cron` ejecuta `app.expire_pending_join_requests()` cada 15 minutos como `chatly_app`. La función localiza solicitudes `pending` con `vence_en <= now()`, las marca `expired`, escribe auditoría y publica `join_request.resolved` con `app.publish_social_event(...)` en la misma transacción. La operación de creación/consulta de solicitudes también comprueba y resuelve vencimientos atrasados antes de aplicar el límite de una solicitud pendiente. La entrega del aviso es best-effort, pero el estado persistido nunca depende del job.
+
+### 16.9 Exclusiones sociales de la V1
+
+No se crearán amistades, seguidores/seguidos, solicitudes de contacto, solicitudes de conversación, bloqueo, reportes ni moderación avanzada (Q150, Q179). La relación entre usuarios se limita a conversaciones privadas y membresías de grupos.

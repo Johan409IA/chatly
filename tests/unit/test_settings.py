@@ -65,6 +65,31 @@ def test_acepta_driver_psycopg() -> None:
     assert _settings(database_url=url).database_url == url
 
 
+def test_rechaza_driver_no_psycopg_en_app_url() -> None:
+    """La URL de runtime también debe usar `postgresql+psycopg`."""
+    with pytest.raises(PydanticValidationError, match="postgresql\\+psycopg"):
+        _settings(app_database_url="postgresql://usuario:secreto@host:5432/postgres")
+
+
+def test_resolve_app_database_url_prioridad(monkeypatch: pytest.MonkeyPatch) -> None:
+    """El runtime prefiere APP_DATABASE_URL, luego TEST_DATABASE_URL y DATABASE_URL."""
+    from Chatly.backend.database.session import resolve_app_database_url
+
+    monkeypatch.delenv("APP_DATABASE_URL", raising=False)
+    monkeypatch.delenv("TEST_DATABASE_URL", raising=False)
+
+    app_url = "postgresql+psycopg://app:secreto@host:5432/postgres?sslmode=require"
+    test_url = "postgresql+psycopg://test:secreto@host:5432/postgres?sslmode=require"
+
+    assert (
+        resolve_app_database_url(_settings(app_database_url=app_url, test_database_url=test_url))
+        == app_url
+    )
+    assert resolve_app_database_url(_settings(test_database_url=test_url)) == test_url
+    settings = _settings()
+    assert resolve_app_database_url(settings) == settings.database_url
+
+
 def test_get_settings_cacheado() -> None:
     """get_settings devuelve siempre la misma instancia."""
     from Chatly.backend.core.settings import get_settings
