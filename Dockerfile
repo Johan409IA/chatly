@@ -53,8 +53,9 @@ USER reflex
 
 EXPOSE $PORT
 
-# Aplica las migraciones antes de arrancar; si fallan, el contenedor no inicia.
-CMD if [ -d migrations ]; then reflex db migrate; fi && \
+# Aplica las migraciones de Alembic antes de arrancar; si fallan, el contenedor
+# no inicia (reflex db migrate no aplica: la app no define db_url en rxconfig).
+CMD if [ -f alembic.ini ]; then alembic upgrade head; fi && \
     caddy start && \
     redis-server --daemonize yes && \
     exec reflex run --env prod --backend-only
