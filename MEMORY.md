@@ -3,7 +3,7 @@
 Memoria del proyecto entre sesiones de agente. Máximo ~50 líneas.
 
 ## Estado actual
-- **Desplegada en Render (2026-11-14)**: https://chatly-3lh3.onrender.com — servicio `srv-dbsdbjdg1s2s73es70cg` (Docker, plan Free, proyecto `chatly`, rama `main`, auto-deploy por commit). Verificado: `/api/health`, `/api/interests`, `/login`, `/register` y eventos por websocket (Playwright). `FRONTEND_URL`/`CORS_ORIGINS` se derivan de `RENDER_EXTERNAL_URL` (`settings.py`). **Pendiente en Supabase**: Site URL y Redirect URL `https://chatly-3lh3.onrender.com/auth/confirm`.
+- **Desplegada en Render (2026-11-14)**: https://chatly-3lh3.onrender.com — servicio `srv-dbsdbjdg1s2s73es70cg` (Docker, plan Free, proyecto `chatly`, rama `main`, auto-deploy por commit). Verificado: `/api/health`, `/api/interests`, `/login`, `/register` y eventos por websocket (Playwright). `FRONTEND_URL`/`CORS_ORIGINS` se derivan de `RENDER_EXTERNAL_URL` (`settings.py`). Badge «Built with Reflex» desactivado con `show_built_with_reflex=False` en `rxconfig.py` (se lee al compilar: requiere redeploy). **Pendiente en Supabase**: Site URL y Redirect URL `https://chatly-3lh3.onrender.com/auth/confirm`.
 - **Iteración 1 (arquitectura de backend) completa y verificada** en `arquitectura-backend`.
 - **Iteración 2, tareas 1–6 hechas** (Supabase Auth, JWT/JWKS, guardas Reflex). Correos reales de Brevo **pendientes**.
 - **API de autenticación implementada y probada**: 8 endpoints en `backend/api/routes/auth.py`; capas `integrations/supabase/auth_client.py`, `services/auth_service.py`, `schemas/auth.py`.
