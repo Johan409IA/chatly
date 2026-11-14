@@ -65,6 +65,31 @@ def test_acepta_driver_psycopg() -> None:
     assert _settings(database_url=url).database_url == url
 
 
+def test_url_publica_de_render(monkeypatch: pytest.MonkeyPatch) -> None:
+    """En Render, `RENDER_EXTERNAL_URL` define frontend, CORS y mismo origen."""
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://chatly-3lh3.onrender.com/")
+    monkeypatch.setenv("FRONTEND_URL", "https://dominio-equivocado.example")
+    monkeypatch.setenv("API_PUBLIC_URL", "https://dominio-equivocado.example")
+
+    settings = _settings()
+
+    assert settings.frontend_url == "https://chatly-3lh3.onrender.com"
+    assert settings.cors_origins == "https://chatly-3lh3.onrender.com"
+    assert settings.cors_origins_list == ["https://chatly-3lh3.onrender.com"]
+    assert settings.api_public_url == ""
+
+
+def test_sin_url_de_render_mantiene_valores(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fuera de Render se respeta la configuración recibida."""
+    monkeypatch.delenv("RENDER_EXTERNAL_URL", raising=False)
+
+    settings = _settings(frontend_url="http://localhost:3000")
+
+    assert settings.frontend_url == "http://localhost:3000"
+    assert settings.api_public_url == "http://localhost:8000"
+    assert settings.cors_origins == "http://localhost:3000,http://127.0.0.1:3000"
+
+
 def test_rechaza_driver_no_psycopg_en_app_url() -> None:
     """La URL de runtime también debe usar `postgresql+psycopg`."""
     with pytest.raises(PydanticValidationError, match="postgresql\\+psycopg"):
