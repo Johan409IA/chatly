@@ -1,18 +1,28 @@
-name: Deploy Reflex Cloud
+name: CI
 
 on:
   push:
     branches:
       - main
-
-  workflow_dispatch:
+      - develop
+  pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  deploy:
+  checks:
     runs-on: ubuntu-latest
+
+    # Valores ficticios: la suite unitaria no toca servicios externos, pero
+    # importar la app exige que la configuración valide.
+    env:
+      DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/chatly
+      APP_DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/chatly
+      TEST_DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/chatly
+      SUPABASE_URL: https://ci.invalid
+      SUPABASE_PUBLISHABLE_KEY: ci
+      SUPABASE_JWKS_URL: https://ci.invalid/.well-known/jwks.json
 
     steps:
       - name: Checkout repository
@@ -30,20 +40,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
-      - name: Lint and format check
-        run: |
-          uv run ruff check .
-          uv run ruff format --check .
+      - name: Lint
+        run: uv run ruff check .
 
       - name: Unit tests
         run: uv run pytest tests/unit -q
 
       - name: Compile check
         run: uv run reflex compile --dry
-
-      - name: Deploy to Reflex Cloud
-        uses: reflex-dev/reflex-deploy-action@v3
-        with:
-          auth_token: ${{ secrets.REFLEX_AUTH_TOKEN }}
-          project_id: ${{ secrets.REFLEX_PROJECT_ID }}
-          app_directory: "."

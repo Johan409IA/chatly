@@ -1,0 +1,16 @@
+.web
+.git
+.github
+.venv
+__pycache__
+*.py[cod]
+.states
+*.db
+uploaded_files
+Dockerfile
+.env
+.env.*
+docs
+tests
+assets/ux-ui
+*.md
