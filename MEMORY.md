@@ -3,6 +3,7 @@
 Memoria del proyecto entre sesiones de agente. Máximo ~50 líneas.
 
 ## Estado actual
+- **Desplegada en Render (2026-11-14)**: https://chatly-3lh3.onrender.com — servicio `srv-dbsdbjdg1s2s73es70cg` (Docker, plan Free, proyecto `chatly`, rama `main`, auto-deploy por commit). Verificado: `/api/health`, `/api/interests`, `/login`, `/register` y eventos por websocket (Playwright). `FRONTEND_URL`/`CORS_ORIGINS` se derivan de `RENDER_EXTERNAL_URL` (`settings.py`). **Pendiente en Supabase**: Site URL y Redirect URL `https://chatly-3lh3.onrender.com/auth/confirm`.
 - **Iteración 1 (arquitectura de backend) completa y verificada** en `arquitectura-backend`.
 - **Iteración 2, tareas 1–6 hechas** (Supabase Auth, JWT/JWKS, guardas Reflex). Correos reales de Brevo **pendientes**.
 - **API de autenticación implementada y probada**: 8 endpoints en `backend/api/routes/auth.py`; capas `integrations/supabase/auth_client.py`, `services/auth_service.py`, `schemas/auth.py`.
@@ -40,6 +41,9 @@ Memoria del proyecto entre sesiones de agente. Máximo ~50 líneas.
 - **Los errores por campo son vars sueltas** (`error_email`, `error_alias`, …), no un dict: leer `state.dict["clave"]` en el cliente devuelve `undefined` si la clave no existe y el mensaje no se pinta.
 
 ## Aprendizajes y errores a evitar
+- **`reflex db migrate` sale con código 1** si `rxconfig.py` no define `db_url`, y en el contenedor eso aborta el arranque antes de Caddy. La app usa Alembic: `CMD ... alembic upgrade head` (condicionado a `-f alembic.ini`).
+- **El dominio de Render no se conoce al crear el servicio** (añade sufijo: `chatly-3lh3`) y la CLI no permite editar env vars después; por eso la URL pública se deriva de `RENDER_EXTERNAL_URL`.
+- **El build de Docker necesita la configuración válida**: `reflex export` importa la app, así que el `RUN` del export pasa marcadores ficticios (`.env` está en `.dockerignore`).
 - **I/O síncrono bloquea el event loop (granian avisa con >200 ms)**: la descarga del JWKS (`PyJWKClient` usa `urllib`) y `create_async_engine` (importa el dialecto de PostgreSQL) son síncronas. Solución: warm-up `_warm_up` en el lifespan del API de `Chatly.py` (Reflex SÍ ejecuta el lifespan del `api_transformer`; log "Warm-up completado" lo confirma) y verificación JWT con `asyncio.to_thread` en `auth_service`, `deps.require_actor` y las guardas de `SessionState` (ahora `async def`).
 - **`rx.call_script` evalúa el código con `eval`**: debe ser una EXPRESIÓN (`(async () => {...})()`). Si es solo la función, el callback recibe un valor no serializable y el servidor recibe el payload vacío (`TypeError: ... missing 1 required positional argument`).
 - **En Windows granian fuerza `ProactorEventLoop`** (`granian/_loops.py`), que psycopg async no admite: toda consulta a la BD falla con `InterfaceError`. Se resuelve con `winloop` en el grupo `dev` (marker win32): granian lo registra y `loop=auto` lo prefiere. **No usar uvicorn**: Reflex llama a `uvicorn.run(reload=True)` sin guarda `__main__`, y en Windows el spawn re-ejecuta el CLI y el arranque se cuelga; además el CLI no lee `.env` para `REFLEX_USE_GRANIAN`.
@@ -60,5 +64,6 @@ Memoria del proyecto entre sesiones de agente. Máximo ~50 líneas.
 - Revisión de la migración y su RLS por dos integrantes (pendiente, regla de AGENTS.md).
 - Middleware de rate limit (§14) y endpoints sociales pendientes.
 - Continuar con `0006`–`0012` y cerrar con `0013`/`0014`; revisar RLS/grants con `supabase db advisors`.
-- Al desplegar: `API_PUBLIC_URL`, `CORS_ORIGINS` y variables de pool.
+- Configurar Site URL y Redirect URL de producción en Supabase y probar registro/recuperación reales. Opcional: activar «After CI Checks Pass» en Render (Dashboard → Settings) para que el deploy espere al workflow `CI`.
+- Plan Free: el servicio se duerme a los 15 min sin tráfico (cold start ~1 min); con tráfico real conviene subir a `0.5c-512mb`.
 - Las referencias de diseño están en **`docs/ux-ui/`** (fuera de `assets/`, para que no se copien al build); `assets/` solo lleva lo que la app sirve (`auth.css`, `favicon.ico`, `icons/`, `js/`).

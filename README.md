@@ -76,7 +76,7 @@ uv run alembic downgrade -1
 ### Supabase Auth
 
 - Configura SMTP (Brevo) en Supabase Auth para la confirmación de correo y la recuperación de contraseña.
-- Añade a las Redirect URLs la ruta de confirmación de la app: `http://localhost:3000/auth/confirm` (y la URL pública al desplegar). El backend la construye a partir de `FRONTEND_URL`.
+- Añade a las Redirect URLs la ruta de confirmación de la app: `http://localhost:3000/auth/confirm` y, en producción, `https://chatly-3lh3.onrender.com/auth/confirm`. El backend la construye a partir de `FRONTEND_URL` (en Render se deriva de `RENDER_EXTERNAL_URL`). Configura también esa URL como **Site URL** para que los enlaces de recuperación apunten a la app desplegada.
 - Personaliza la plantilla «Reset password» en Supabase Auth con el flujo `token_hash`, para que el enlace aterrice en la app y el backend canjee el token:
 
   ```html
@@ -97,6 +97,32 @@ No definas `NODE_ENV=production` de forma global: en desarrollo Vite y React
 necesitan el runtime de desarrollo (`NODE_ENV=development`, que es el valor por
 defecto cuando la variable no existe). En este proyecto la variable que lee la
 aplicación es `APP_ENV`.
+
+## Despliegue en producción (Render)
+
+La app corre en **https://chatly-3lh3.onrender.com** como servicio web Docker
+(plan Free) dentro del proyecto `chatly` de Render, sobre la rama `main`.
+
+- `Dockerfile`: imagen de un solo contenedor. En el build exporta el frontend
+  con Bun y, al arrancar, aplica `alembic upgrade head`, levanta Caddy (puerto
+  `$PORT`, 10000 por defecto) y redis, y ejecuta `reflex run --env prod`.
+- `Caddyfile`: sirve el frontend estático desde `/srv` y hace proxy de
+  `/_event/*`, `/ping`, `/_health`, `/_upload*` y `/api/*` al backend (`:8000`).
+- `.dockerignore`: excluye `.web`, `.venv`, `.env`, `docs/` y `tests/` del build.
+- `requirements.txt`: se regenera con
+  `uv export --no-dev --no-emit-project --no-hashes --format requirements-txt -o requirements.txt`.
+- Variables de entorno: se configuran en Render (servicio → Environment) con los
+  valores de producción. `FRONTEND_URL`, `API_PUBLIC_URL` y `CORS_ORIGINS` se
+  derivan de `RENDER_EXTERNAL_URL` en `settings.py`, así que sobreviven a
+  cambios de dominio. `API_PUBLIC_URL` queda vacío: el navegador llama al API en
+  el mismo origen.
+- Auto-deploy: cada push o merge a `main` reconstruye y despliega. El workflow
+  `CI` (`.github/workflows/ci.yml`) ejecuta ruff, tests unitarios y
+  `reflex compile --dry` en cada push a `main`/`develop` y en pull requests.
+
+Notas del plan Free: el servicio se duerme tras 15 minutos sin tráfico (la
+siguiente petición tarda ~1 minuto en despertarlo) y no envía SMTP saliente; los
+correos los envía Supabase.
 
 ## Tests
 
