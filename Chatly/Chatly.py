@@ -1,5 +1,9 @@
 """Aplicación Chatly: rutas, API y guardas de sesión."""
 
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
 import reflex as rx
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -14,8 +18,10 @@ from Chatly.backend.core.errors import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
+from Chatly.backend.core.jwt import get_jwt_verifier
 from Chatly.backend.core.logging import configure_logging
 from Chatly.backend.core.settings import get_settings
+from Chatly.backend.database.session import get_app_engine
 from Chatly.pages.auth.confirm import confirm_page
 from Chatly.pages.auth.forgot_password import forgot_password_page
 from Chatly.pages.auth.login import login_page
@@ -28,6 +34,29 @@ from Chatly.state.session_state import SessionState
 # El logging JSON se configura antes de crear la app;
 # así ningún evento posterior queda sin redacción.
 configure_logging(get_settings().log_level)
+
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _warm_up(_: FastAPI):
+    """Precarga el JWKS y el engine de BD al arrancar, fuera del event loop.
+
+    La descarga del JWKS (`urllib`) y la creación del engine (importa el
+    dialecto de PostgreSQL) son síncronas: sin este warm-up, la primera
+    petición que las necesite bloquea el event loop ~1 s y granian avisa.
+    Si el JWKS falla (sin red), la primera verificación real lo reintentará.
+    """
+    try:
+        await asyncio.to_thread(get_jwt_verifier().prime)
+    except Exception:
+        logger.warning("No se pudo precargar el JWKS; se descargará al primer uso")
+    try:
+        await asyncio.to_thread(get_app_engine)
+        logger.info("Warm-up completado: JWKS y engine de base de datos listos")
+    except Exception:
+        logger.warning("No se pudo precargar el engine de base de datos", exc_info=True)
+    yield
 
 
 class State(rx.State):
@@ -55,6 +84,7 @@ api_app = FastAPI(
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
+    lifespan=_warm_up,
 )
 # El navegador llama al API en otro puerto (:8000 desde :3000): sin CORS con
 # credenciales el `fetch` se rechaza y las cookies HttpOnly se descartan.

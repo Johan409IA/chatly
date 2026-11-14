@@ -9,6 +9,7 @@ Operaciones críticas de auditoría llegan con `audit_logs` (Iteración 8,
 roadmap.md:385-386); los puntos donde se registrarán están marcados.
 """
 
+import asyncio
 import logging
 from functools import lru_cache
 from typing import Annotated
@@ -16,7 +17,12 @@ from uuid import UUID
 
 from fastapi import Depends
 
-from Chatly.backend.core.errors import ConflictError, ErrorCode, ValidationError
+from Chatly.backend.core.errors import (
+    ConflictError,
+    ErrorCode,
+    UnauthorizedError,
+    ValidationError,
+)
 from Chatly.backend.core.jwt import get_jwt_verifier
 from Chatly.backend.core.settings import get_settings
 from Chatly.backend.integrations.supabase.auth_client import (
@@ -107,8 +113,10 @@ class AuthService:
         """Grant `password` de Supabase; devuelve tokens validados localmente."""
         body = await self._client.sign_in(request.email, request.password)
         auth_session = session_data_from_supabase(body, email_verified=self._email_verified(body))
-        # Verificar firma/claims (iss, aud, exp) antes de confiar en el token.
-        auth_session.user.id = str(get_jwt_verifier().verify(auth_session.access_token).id)
+        # Verificar firma/claims (iss, aud, exp) antes de confiar en el token;
+        # en un hilo porque el JWKS se descarga con I/O síncrono.
+        actor = await asyncio.to_thread(get_jwt_verifier().verify, auth_session.access_token)
+        auth_session.user.id = str(actor.id)
         profile = await self._profiles.get_profile(auth_session.user.id)
         if profile is not None:
             auth_session.user.alias = profile.alias
@@ -121,7 +129,8 @@ class AuthService:
         # En refresh el correo ya se verificó al iniciar sesión, así que
         # email_verified=True se hereda de esa validación anterior.
         auth_session = session_data_from_supabase(body, email_verified=True)
-        auth_session.user.id = str(get_jwt_verifier().verify(auth_session.access_token).id)
+        actor = await asyncio.to_thread(get_jwt_verifier().verify, auth_session.access_token)
+        auth_session.user.id = str(actor.id)
         return auth_session
 
     async def logout(self, access_token: str) -> None:
@@ -147,8 +156,17 @@ class AuthService:
         return StatusResponse()
 
     async def reset_password(self, request: ResetPasswordRequest) -> None:
-        """Nueva contraseña con el access token del enlace de recuperación."""
-        await self._client.update_password(request.token, request.password)
+        """Nueva contraseña: canjea el `token_hash` por una sesión de recuperación.
+
+        La sesión resultante lleva la marca de recuperación, así que Supabase
+        no exige la contraseña actual; el JWT se verifica antes de usarlo.
+        """
+        session = await self._client.verify_token_hash(request.token_hash, "recovery")
+        access_token = str(session.get("access_token") or "")
+        if not access_token:
+            raise UnauthorizedError("El enlace no es válido o ha caducado.")
+        await asyncio.to_thread(get_jwt_verifier().verify, access_token)
+        await self._client.update_password(access_token, request.password)
 
     async def confirm(self, request: ConfirmRequest) -> None:
         """Intercambia el token del enlace de confirmación (§4.8).
@@ -157,7 +175,7 @@ class AuthService:
         (recomendada) y `code` del flujo PKCE.
         """
         if request.token_hash:
-            await self._client.verify_signup(request.token_hash, request.type)
+            await self._client.verify_token_hash(request.token_hash, request.type)
         else:
             await self._client.exchange_code(request.code or "")
 

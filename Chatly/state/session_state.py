@@ -11,6 +11,7 @@ Sigue `docs/architecture.md` §4.1 y §5.4:
   la tabla `profiles` (Iteración 2, tareas de perfil).
 """
 
+import asyncio
 from http.cookies import SimpleCookie
 
 import reflex as rx
@@ -42,7 +43,7 @@ class SessionState(rx.State):
         return morsel.value if morsel else None
 
     @rx.event
-    def guard_page(self) -> rx.event.EventSpec | list[rx.event.EventSpec]:
+    async def guard_page(self) -> rx.event.EventSpec | list[rx.event.EventSpec]:
         """Guarda de `on_load`: resuelve la sesión o redirige a `/login`."""
         if self.actor_id:
             return []
@@ -52,7 +53,9 @@ class SessionState(rx.State):
             return rx.redirect("/login")
 
         try:
-            actor = get_jwt_verifier().verify(token)
+            # En un hilo: la descarga del JWKS es I/O síncrono y bloquearía
+            # el event loop cuando la caché de claves expira.
+            actor = await asyncio.to_thread(get_jwt_verifier().verify, token)
         except Exception:
             return rx.redirect("/login")
 
@@ -60,7 +63,7 @@ class SessionState(rx.State):
         return []
 
     @rx.event
-    def redirect_if_authenticated(self) -> rx.event.EventSpec | list[rx.event.EventSpec]:
+    async def redirect_if_authenticated(self) -> rx.event.EventSpec | list[rx.event.EventSpec]:
         """Guarda de `/login`: un usuario con sesión válida pasa al inicio."""
         if self.actor_id:
             return rx.redirect("/")
@@ -68,7 +71,7 @@ class SessionState(rx.State):
         token = self._read_access_token()
         if token:
             try:
-                actor = get_jwt_verifier().verify(token)
+                actor = await asyncio.to_thread(get_jwt_verifier().verify, token)
                 self.actor_id = str(actor.id)
                 return rx.redirect("/")
             except Exception:

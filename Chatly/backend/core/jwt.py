@@ -75,6 +75,15 @@ class JWTVerifier:
             self._cache[cache_key] = (actor, int(claims["exp"]))
         return actor
 
+    def prime(self) -> None:
+        """Descarga y cachea el JWKS por adelantado (warm-up de arranque).
+
+        La descarga usa I/O síncrono (`urllib`): llamarlo fuera del event loop
+        evita bloquearlo en la primera verificación. Si falla (sin red), la
+        primera verificación real lo reintentará.
+        """
+        self._jwks_client.get_signing_keys()
+
     def _decode(self, token: str) -> dict:
         signing_key = self._jwks_client.get_signing_key_from_jwt(token)
         return jwt.decode(

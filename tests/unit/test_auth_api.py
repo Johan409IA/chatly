@@ -131,10 +131,12 @@ class _FakeSupabaseClient:
         self.calls.append("update_password")
         await self._maybe_fail()
 
-    async def verify_signup(self, token_hash: str, verify_type: str = "signup") -> dict[str, Any]:
-        self.calls.append("verify_signup")
+    async def verify_token_hash(
+        self, token_hash: str, verify_type: str = "signup"
+    ) -> dict[str, Any]:
+        self.calls.append("verify_token_hash")
         await self._maybe_fail()
-        return {}
+        return self.tokens_response
 
     async def exchange_code(self, code: str) -> dict[str, Any]:
         self.calls.append("exchange_code")
@@ -406,11 +408,36 @@ def test_recuperacion_responde_202_siempre(fake_client: TestClient) -> None:
 
 def test_restablecer_contrasena_debil_responde_weak_password(fake_client: TestClient) -> None:
     response = fake_client.post(
-        "/api/auth/reset-password", json={"token": "t", "password": "debil"}
+        "/api/auth/reset-password", json={"token_hash": "t", "password": "debil"}
     )
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "weak_password"
+
+
+def test_restablecer_contrasena_exitoso_canjea_y_actualiza(fake_client: TestClient) -> None:
+    response = fake_client.post(
+        "/api/auth/reset-password",
+        json={"token_hash": "hash-de-prueba", "password": "Contra$ena1"},
+    )
+
+    assert response.status_code == 204
+    assert fake_client.fake.calls == ["verify_token_hash", "update_password"]  # type: ignore[attr-defined]
+
+
+def test_restablecer_con_token_invalido_responde_unauthorized(fake_client: TestClient) -> None:
+    fake_client.fake.error_to_raise = DomainError(  # type: ignore[attr-defined]
+        ErrorCode.UNAUTHORIZED,
+        "El enlace no es válido o ha caducado.",
+        status_code=401,
+    )
+    response = fake_client.post(
+        "/api/auth/reset-password",
+        json={"token_hash": "hash-invalido", "password": "Contra$ena1"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "unauthorized"
 
 
 def test_confirmar_con_token_hash_responde_204(fake_client: TestClient) -> None:
@@ -419,7 +446,7 @@ def test_confirmar_con_token_hash_responde_204(fake_client: TestClient) -> None:
     )
 
     assert response.status_code == 204
-    assert fake_client.fake.calls[-1] == "verify_signup"  # type: ignore[attr-defined]
+    assert fake_client.fake.calls[-1] == "verify_token_hash"  # type: ignore[attr-defined]
 
 
 def test_confirmar_con_codigo_pkce_responde_204(fake_client: TestClient) -> None:

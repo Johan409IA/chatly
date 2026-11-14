@@ -77,6 +77,11 @@ uv run alembic downgrade -1
 
 - Configura SMTP (Brevo) en Supabase Auth para la confirmación de correo y la recuperación de contraseña.
 - Añade a las Redirect URLs la ruta de confirmación de la app: `http://localhost:3000/auth/confirm` (y la URL pública al desplegar). El backend la construye a partir de `FRONTEND_URL`.
+- Personaliza la plantilla «Reset password» en Supabase Auth con el flujo `token_hash`, para que el enlace aterrice en la app y el backend canjee el token:
+
+  ```html
+  <a href="{{ .SiteURL }}/reset-password?token_hash={{ .TokenHash }}&type=recovery">Restablecer contraseña</a>
+  ```
 
 ## Ejecución en desarrollo
 

@@ -299,10 +299,15 @@ Respuesta `202` siempre. El correo lleva el enlace de recuperación de Supabase.
 ### 4.7 `POST /api/auth/reset-password`
 
 ```json
-{ "token": "token-de-recuperacion", "password": "********" }
+{ "token_hash": "token_hash-del-enlace", "password": "********" }
 ```
 
-Respuesta `204`. Se aplica la misma política de contraseñas del registro. Errores: `401 unauthorized`, `422 weak_password`, `validation_error`.
+Respuesta `204`. El `token_hash` viene del enlace de la plantilla de
+recuperación (`{{ .SiteURL }}/reset-password?token_hash={{ .TokenHash }}&type=recovery`);
+el backend lo canjea por una sesión de recuperación (`POST /auth/v1/verify` con
+`type=recovery`) y cambia la contraseña con su access token, por lo que no se
+pide la contraseña actual. Se aplica la misma política de contraseñas del
+registro. Errores: `401 unauthorized`, `422 weak_password`, `validation_error`.
 
 ---
 

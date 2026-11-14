@@ -199,11 +199,15 @@ class SupabaseAuthClient:
             extra_headers={"Authorization": f"Bearer {token}"},
         )
 
-    async def verify_signup(self, token_hash: str, verify_type: str = "signup") -> dict[str, Any]:
-        """Confirma el correo con el `token_hash` del enlace (grant de flujo de email).
+    async def verify_token_hash(
+        self, token_hash: str, verify_type: str = "signup"
+    ) -> dict[str, Any]:
+        """Canjea el `token_hash` del enlace por una sesión (grant de flujo de email).
 
-        Es el flujo de la plantilla que usa `{{ .TokenHash }}`. Si la plantilla
-        de Supabase usa PKCE, el enlace trae `?code=` y se usa `exchange_code`.
+        Es el flujo de las plantillas que usan `{{ .TokenHash }}`. Con
+        `verify_type="recovery"` devuelve una sesión de recuperación, apta para
+        cambiar la contraseña sin la actual. Si la plantilla de Supabase usa
+        PKCE, el enlace trae `?code=` y se usa `exchange_code`.
         """
         return await self._request(
             "POST",

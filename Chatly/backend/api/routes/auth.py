@@ -147,7 +147,7 @@ async def reset_password(
     request: ResetPasswordRequest,
     service: AuthServiceDep,
 ) -> None:
-    """Nueva contraseña con el token del enlace de recuperación (§4.7)."""
+    """Nueva contraseña con el `token_hash` del enlace de recuperación (§4.7)."""
     await service.reset_password(request)
 
 

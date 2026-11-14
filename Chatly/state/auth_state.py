@@ -233,6 +233,30 @@ _CONFIRM_TEMPLATE = (
 )
 
 
+# Recuperación: el enlace de la plantilla `{{ .TokenHash }}` llega a
+# «/reset-password?token_hash=…&type=recovery»; se acepta también en el
+# fragmento por si el correo usa el flujo implícito. Sin token → 401.
+_RESET_TEMPLATE = (
+    "(async () => {" + _API_JS + "const search = new URLSearchParams(window.location.search);"
+    "const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));"
+    "const tokenHash = search.get('token_hash') || hash.get('token_hash') || '';"
+    "if (!tokenHash) {"
+    "  return JSON.stringify({ status: 401, body: { error: { code: 'unauthorized' } } });"
+    "}"
+    'const res = await fetch(apiBase + "/api/auth/reset-password", {'
+    'method: "POST",'
+    'headers: {"Content-Type": "application/json"},'
+    'credentials: "include",'
+    "body: JSON.stringify({ token_hash: tokenHash, password: @PASSWORD@ }),"
+    "});"
+    "const text = await res.text();"
+    "let body = {};"
+    "if (text) { try { body = JSON.parse(text); } catch (ignored) {} }"
+    "return JSON.stringify({ status: res.status, body });"
+    "})()"
+)
+
+
 def _fetch_script(path: str, payload: Any) -> str:
     """Construye el script `fetch` de una llamada con el cuerpo dado.
 
@@ -639,12 +663,12 @@ class AuthState(rx.State):
 
     @rx.event
     def handle_reset(self, _form_data: dict | None = None) -> rx.event.EventSpec:
-        """Guarda la nueva contraseña con el token del fragmento («/reset-password#token»)."""
+        """Guarda la nueva contraseña con el `token_hash` del enlace de recuperación.
+
+        El token lo lee el navegador («/reset-password?token_hash=…»); el
+        backend lo canjea por una sesión de recuperación antes de cambiarla.
+        """
         self._clear_form_errors()
-        token = self.router.url.fragment.strip()
-        if not token:
-            self.error_message = _ERROR_TEXTS["unauthorized"]
-            return []
         errors: dict[str, str] = {}
         if not password_is_strong(self.password):
             errors["password"] = (
@@ -659,7 +683,9 @@ class AuthState(rx.State):
         self.is_loading = True
         self._clear_secrets()
         return rx.call_script(
-            _fetch_script("/api/auth/reset-password", {"token": token, "password": password}),
+            _RESET_TEMPLATE.replace("@API_BASE@", _API_BASE).replace(
+                "@PASSWORD@", json.dumps(password)
+            ),
             callback=AuthState.handle_reset_result,
         )
 

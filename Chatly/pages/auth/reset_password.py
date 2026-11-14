@@ -1,9 +1,10 @@
 """Página de nueva contraseña tras la recuperación.
 
-El correo de Supabase llega aquí con el fragmento `#token` (acordado con el
-equipo, §4.7): `AuthState.handle_reset` invoca `POST /api/auth/reset-password`
-con `fetch` y tras `204` lleva a login con la contraseña ya cambiada.
-Si el enlace no trae token, se avisa sin revelar detalles del enlace.
+El correo de Supabase llega aquí con `?token_hash=…&type=recovery` (plantilla
+`{{ .TokenHash }}`, §4.7): `AuthState.handle_reset` invoca
+`POST /api/auth/reset-password` con `fetch` y tras `204` lleva a login con la
+contraseña ya cambiada. Si el enlace no trae token, se avisa sin revelar
+detalles del enlace.
 """
 
 import reflex as rx

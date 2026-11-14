@@ -167,14 +167,19 @@ class EmailRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    """Cuerpo de `POST /api/auth/reset-password` (§4.7)."""
+    """Cuerpo de `POST /api/auth/reset-password` (§4.7).
 
-    token: str
+    `token_hash` es el que trae el enlace de la plantilla `{{ .TokenHash }}`;
+    el servicio lo canjea por una sesión de recuperación antes de cambiar la
+    contraseña.
+    """
+
+    token_hash: str
     password: str
 
-    @field_validator("token")
+    @field_validator("token_hash")
     @classmethod
-    def _token_present(cls, value: str) -> str:
+    def _token_hash_present(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("El enlace de recuperación no es válido.")
         return value.strip()

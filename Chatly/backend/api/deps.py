@@ -5,6 +5,7 @@ El token llega por la cookie `chatly_at` (HttpOnly) o, solo en pruebas,
 por `Authorization: Bearer <jwt>`. La identidad siempre sale del JWT.
 """
 
+import asyncio
 import logging
 
 from fastapi import Request
@@ -32,7 +33,9 @@ async def require_actor(request: Request) -> Actor:
         raise UnauthorizedError()
 
     try:
-        return get_jwt_verifier().verify(token)
+        # La descarga del JWKS es I/O síncrona: se hace en un hilo para no
+        # bloquear el event loop cuando la caché de claves expira.
+        return await asyncio.to_thread(get_jwt_verifier().verify, token)
     except Exception:
         logger.warning("JWT inválido o expirado en %s", request.url.path)
         raise UnauthorizedError(
