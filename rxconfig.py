@@ -8,4 +8,5 @@ config = rx.Config(
     app_name="Chatly",
     plugins=[SitemapPlugin(), RadixThemesPlugin()],
     frontend_packages=["@supabase/supabase-js"],
+    show_built_with_reflex=False,
 )
