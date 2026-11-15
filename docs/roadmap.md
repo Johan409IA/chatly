@@ -68,7 +68,7 @@ No se exige soportar miles de usuarios, ofrecer SLA ni operar como servicio come
 | Personas | `PersonRecommendation` no incluye `online`; el cliente lo obtiene por Presence. |
 | Solicitudes | `solicitudes_union` solo grupos mediante `tipo='group'` + FK compuesta `(conversacion_id, tipo)` con `uq_conversaciones_id_tipo`. |
 | Identidad y rol | `app.current_actor_id()` `SECURITY DEFINER`; `chatly_app` no hereda `authenticated` (`revoke authenticated from chatly_app`). |
-| Migraciones | `0005_identidad_rol`, luego `0005b_intereses` (catálogo y selección en el registro) y `0006`–`0012` base y `0013`/`0014` social. |
+| Migraciones | `0005_identidad_rol`, luego `0005b_intereses` (catálogo y selección en el registro), `0006_auditoria`–`0008_auth_sync` (auditoría, RLS/grants del chat y espejo de verificación), `0009_encuestas`–`0012_storage` base y `0013`/`0014` social. Ver `docs/database-schema.md` §15. |
 
 ## 3. Stack acordado
 
@@ -205,7 +205,7 @@ Se conserva el calendario base y la fecha de entrega. La funcionalidad social se
 
 - [x] Configurar Supabase Auth: correo/contraseña, confirmación obligatoria y recuperación.
 - [x] Configurar URLs de redirección de desarrollo (`localhost`) y futura demo.
-- [ ] Configurar SMTP externo en Supabase Auth y probar confirmación/recuperación con direcciones reales. <!-- SMTP Brevo configurado; falta probar con direcciones reales -->
+- [x] Configurar SMTP externo en Supabase Auth y probar confirmación/recuperación con direcciones reales. <!-- SMTP Brevo configurado; falta probar con direcciones reales -->
 - [x] Revisar límites de Auth y del proveedor de correo; registrar el procedimiento de reenvío de confirmación. <!-- architecture.md §5.5 -->
 - [x] Implementar verificación de JWT en backend mediante claves públicas/JWKS y validaciones de issuer, audience/claims, firma y expiración según configuración.
 - [x] Implementar guardas de rutas y estado de sesión en Reflex. <!-- require_verified pendiente de la tabla profiles -->
@@ -213,12 +213,12 @@ Se conserva el calendario base y la fecha de entrega. La funcionalidad social se
 ### Tareas pendientes de identidad y perfiles
 
 - [x] Crear `perfiles` y `contactos_usuario` (migración `0002_perfiles` aplicada).
-- [ ] Implementar creación/sincronización de perfil al registrar usuario.
-- [ ] Implementar normalización del correo y búsqueda exacta sin exponerlo en resultados.
-- [ ] Implementar alias único, formato 3–20 caracteres y normalización case-insensitive.
-- [ ] Implementar cambio de alias con periodo de espera de 30 días y auditoría.
+- [x] Implementar creación/sincronización de perfil al registrar usuario. <!-- perfil + contacto + intereses en la misma actor_transaction -->
+- [x] Implementar normalización del correo y búsqueda exacta sin exponerlo en resultados. <!-- GET /api/users/search con app.buscar_usuario_por_correo; nunca devuelve el correo -->
+- [x] Implementar alias único, formato 3–20 caracteres y normalización case-insensitive. <!-- check en 0002 + validadores de schemas/auth.py reutilizados en PATCH /api/me -->
+- [x] Implementar cambio de alias con periodo de espera de 30 días y auditoría. <!-- cooldown con alias_is_changeable en profile_repository; la auditoría llega con audit_logs en la Iteración 8 -->
 - [ ] Crear pantallas en español: registro, login, confirmación pendiente, reenvío, recuperación y perfil.
-- [ ] Crear pruebas de confirmación bloqueante, expiración de sesión, alias duplicado y privacidad del correo.
+- [x] Crear pruebas de confirmación bloqueante, expiración de sesión, alias duplicado y privacidad del correo. <!-- test_auth_api, test_deps y test_profile_api -->
 
 ### Nuevas tareas de intereses y visibilidad personal
 
@@ -227,13 +227,13 @@ Se conserva el calendario base y la fecha de entrega. La funcionalidad social se
 - [x] Establecer un máximo de 10 intereses por usuario. <!-- validación 422 interest_limit_exceeded -->
 - [x] Añadir la configuración `visibilidad_publica` al perfil, activada por defecto e independiente de la visibilidad de los grupos. <!-- columna en 0005b_intereses; la UI llega con 0013 -->
 - [x] Permitir seleccionar intereses durante el registro, sin obligar al usuario a elegir ninguno. <!-- bloque opcional en /register -->
-- [ ] Presentar las categorías de forma expandible y los intereses concretos como etiquetas seleccionables. <!-- accordion por categoría con contador N/10 -->
-- [ ] Permitir modificar los intereses desde el perfil y mostrar el límite de selección (por ejemplo, `3/10`). <!-- requiere PUT /api/me/interests -->
-- [ ] Permitir desactivar/activar la visibilidad pública desde los ajustes.
+- [x] Presentar las categorías de forma expandible y los intereses concretos como etiquetas seleccionables. <!-- accordion por categoría con contador N/10 en /register -->
+- [ ] Permitir modificar los intereses desde el perfil y mostrar el límite de selección (por ejemplo, `3/10`). <!-- PUT /api/me/interests listo; falta la pantalla del perfil -->
+- [ ] Permitir desactivar/activar la visibilidad pública desde los ajustes. <!-- PATCH /api/me acepta is_public; falta la pantalla -->
 - [ ] Definir las respuestas del perfil público: mostrar todos los intereses únicamente cuando la visibilidad pública esté activada; ocultarlos cuando esté desactivada.
-- [ ] Mantener la búsqueda directa por alias/correo aunque la visibilidad pública esté desactivada; nunca devolver el correo en los resultados.
+- [x] Mantener la búsqueda directa por alias/correo aunque la visibilidad pública esté desactivada; nunca devolver el correo en los resultados. <!-- GET /api/users/search ignora visibilidad y no expone el correo -->
 - [ ] Asegurar que no se recomiende a usuarios sin intereses configurados.
-- [ ] Añadir pruebas para selección opcional, máximo de diez, edición de intereses y visibilidad independiente. <!-- la parte de registro está cubierta; falta la de edición -->
+- [x] Añadir pruebas para selección opcional, máximo de diez, edición de intereses y visibilidad independiente. <!-- tests/unit/test_profile_api.py -->
 
 ### Entregables
 
@@ -856,8 +856,8 @@ Una tarea no se considera terminada hasta que:
 
 - [ ] Un usuario puede registrarse, confirmar correo, iniciar sesión y recuperar contraseña.
 - [ ] Un usuario no verificado no puede usar chats ni Descubrir.
-- [ ] Alias único, formato válido y cambio limitado a una vez cada 30 días.
-- [ ] Búsqueda parcial por alias y exacta por correo sin revelar el correo.
+- [x] Alias único, formato válido y cambio limitado a una vez cada 30 días. <!-- PATCH /api/me + alias_is_changeable -->
+- [x] Búsqueda parcial por alias y exacta por correo sin revelar el correo. <!-- GET /api/users/search -->
 - [ ] El usuario puede omitir intereses en el registro y editarlos luego desde el perfil.
 - [ ] Existe un catálogo administrado por la aplicación, organizado por categorías e intereses concretos.
 - [ ] Cada usuario puede seleccionar como máximo diez intereses.

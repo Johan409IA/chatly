@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from Chatly.backend.api.routes.auth import router as auth_router
 from Chatly.backend.api.routes.health import router as health_router
 from Chatly.backend.api.routes.interests import router as interests_router
+from Chatly.backend.api.routes.profile import router as profile_router
 from Chatly.backend.core.errors import (
     DomainError,
     domain_error_handler,
@@ -92,12 +93,13 @@ api_app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().cors_origins_list,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type"],
 )
 api_app.include_router(health_router)
 api_app.include_router(auth_router)
 api_app.include_router(interests_router)
+api_app.include_router(profile_router)
 api_app.add_exception_handler(DomainError, domain_error_handler)
 api_app.add_exception_handler(RequestValidationError, validation_exception_handler)
 api_app.add_exception_handler(Exception, unhandled_exception_handler)

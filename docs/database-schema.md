@@ -847,15 +847,19 @@ order by o.posicion;
 | `0005_identidad_rol` | `app.current_actor_id()` `SECURITY DEFINER`, `revoke authenticated from chatly_app` y `noinherit` |
 | `0005a_alias_exists` | Función `app.alias_exists(text)` `SECURITY DEFINER` para comprobar el alias antes del registro |
 | `0005b_intereses` | Catálogo de intereses (`categorias_interes`, `intereses`), selección personal (`intereses_usuario`), `perfiles.visibilidad_publica`, `app.catalogo_intereses()` `SECURITY DEFINER`, RLS y grants **(aplicada)** |
-| `0006_encuestas` | `encuestas`, `opciones_encuesta`, `votos_encuesta` |
-| `0007_auditoria` | `registros_auditoria` |
-| `0008_rls` | Políticas del resto de tablas y `security_invoker` de la vista |
-| `0009_grants` | Rol `chatly_app`, privilegios mínimos, `revoke` de `anon`/`authenticated` |
-| `0010_realtime` | Publicación `supabase_realtime` y políticas de `realtime.messages` |
-| `0011_storage` | Bucket `avatars`, políticas de Storage y límites de tamaño/tipo |
-| `0012_auth_sync` | Trigger de sincronización de `correo_verificado_en` (con guardia si `auth.users` no existe) |
+| `0006_auditoria` | `registros_auditoria`, sus índices, RLS de solo inserción y grants mínimos |
+| `0007_rls` | Funciones de autorización (`app.is_verified_actor`, `app.has_membership`, `app.has_period`, `app.is_active_member`, `app.is_active_admin`, `app.can_bootstrap_membership`), políticas RLS y grants de `conversaciones`, `miembros_conversacion`, `preferencias_conversacion`, `mensajes`, `versiones_mensaje` y `reacciones_mensaje`; trigger de protección de periodos y `SECURITY DEFINER` en `tocar_actividad_conversacion` |
+| `0008_auth_sync` | Trigger de sincronización de `correo_verificado_en` (con guardia si `auth.users` no existe) y backfill |
+| `0009_encuestas` | `encuestas`, `opciones_encuesta`, `votos_encuesta` |
+| `0010_grants` | Rol `chatly_app`, privilegios mínimos globales, `security_invoker` de la vista y `revoke` de `anon`/`authenticated` |
+| `0011_realtime` | Publicación `supabase_realtime` y políticas de `realtime.messages` |
+| `0012_storage` | Bucket `avatars`, políticas de Storage y límites de tamaño/tipo |
 | `0013_descubrimiento_social` | Descubribilidad y descripción de grupos, intereses de grupos (`intereses_conversacion`), solicitudes de unión, índices, reglas transaccionales, RLS y grants |
 | `0014_social_cron` | Extensión `pg_cron`, función `app.publish_social_event(...)` y programación de `app.expire_pending_join_requests()` cada 15 minutos como `chatly_app` |
+
+> **Cambio de orden (2026-11-15):** el bloque original `0006_encuestas` → `0009_grants` se renumeró a `0006_auditoria` → `0009_encuestas`, y `0012_auth_sync` pasó a `0008_auth_sync`. Motivo: la API de conversaciones y mensajes necesita auditoría, políticas RLS, grants y el espejo de verificación **antes** de empezar, mientras que las encuestas no bloquean a nadie. Ninguna de las revisiones movidas estaba aplicada (`alembic_version` estaba en `0005b_intereses`), así que la renumeración no rompe entornos. Los prefijos numéricos siguen coincidiendo con el orden de ejecución.
+>
+> Las políticas y grants de chat viven juntos en `0007_rls` a propósito: con RLS activa y sin `GRANT` la aplicación recibe `42501`; con `GRANT` y sin políticas recibe cero filas. Separarlas abre una ventana en la que el backend no puede consultar nada.
 
 Cada migración incluye su prueba de `upgrade`/`downgrade` y se revisa por dos integrantes (A y B).
 

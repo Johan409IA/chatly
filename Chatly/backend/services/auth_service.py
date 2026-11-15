@@ -126,10 +126,16 @@ class AuthService:
     async def refresh(self, refresh_token: str) -> AuthSessionData:
         """Rota el refresh token; el JWT nuevo se valida antes de entregarse."""
         body = await self._client.refresh_session(refresh_token)
-        # En refresh el correo ya se verificó al iniciar sesión, así que
-        # email_verified=True se hereda de esa validación anterior.
-        auth_session = session_data_from_supabase(body, email_verified=True)
-        actor = await asyncio.to_thread(get_jwt_verifier().verify, auth_session.access_token)
+        actor = await asyncio.to_thread(
+            get_jwt_verifier().verify, str(body.get("access_token") or "")
+        )
+        # Antes se asumía `True` («ya se validó al iniciar sesión»), pero un
+        # refresh puede ocurrir sin login previo en este proceso y la cuenta
+        # podría no estar confirmada. Se consulta el espejo de la base
+        # (`0008_auth_sync`) para que la guarda de la UI no mienta.
+        auth_session = session_data_from_supabase(
+            body, email_verified=await self._profiles.is_verified(str(actor.id))
+        )
         auth_session.user.id = str(actor.id)
         return auth_session
 

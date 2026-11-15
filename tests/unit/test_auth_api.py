@@ -60,6 +60,7 @@ class _FakeProfileRepository:
     def __init__(self) -> None:
         self.aliases: set[str] = set()
         self.profiles: dict[str, Any] = {}
+        self.verified: set[str] = set()
 
     async def alias_exists(self, alias: str) -> bool:
         return alias in self.aliases
@@ -73,6 +74,9 @@ class _FakeProfileRepository:
         if data is None:
             return None
         return type("Profile", (), {"alias": data["alias"], "display_name": data["display_name"]})()
+
+    async def is_verified(self, user_id: str) -> bool:
+        return user_id in self.verified
 
 
 class _FakeInterestRepository:
