@@ -1,7 +1,8 @@
 # Selección opcional de intereses en el registro
 
 ## Decisiones cerradas (confirmadas)
-1. **Migración `0005b_intereses`** (`down_revision = 0005a_alias_exists`): se aplica ahora, no renumera `0006`–`0012` (que ya están reservadas en `docs/database-schema.md:849-855`). `0013_descubrimiento_social` queda solo con lo social puro.
+1. **Migración `0005b_intereses`** (`down_revision = 0005a_alias_exists`): se aplica ahora y no renumera el bloque `0006`–`0012` que estaba reservado en `docs/database-schema.md`. `0013_descubrimiento_social` queda solo con lo social puro.
+   - **Revisado el 2026-11-15:** la reserva `0006`–`0012` sí se renumeró después, por una razón distinta a esta decisión. La API de conversaciones necesitaba auditoría, RLS, grants y el espejo de verificación **antes** de empezar, así que el bloque pasó a `0006_auditoria` → `0009_encuestas` y `0012_auth_sync` a `0008_auth_sync`. Ninguna revisión estaba aplicada, así que el cambio no rompió entornos. Ver la nota de `docs/database-schema.md` §15.
 2. **Catálogo público vía `app.catalogo_intereses()` `SECURITY DEFINER`** (mismo patrón que `app.alias_exists`, `migrations/versions/0005a_alias_exists.py:20-51`). Las políticas RLS del catálogo siguen exigiendo actor; no se rompe `docs/authorization-matrix.md:744`.
 3. **`perfiles.visibilidad_publica` + recreación de `app.perfiles_publicos` van en esta migración** (tarea de iteración 2).
 
