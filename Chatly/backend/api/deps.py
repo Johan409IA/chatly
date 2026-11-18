@@ -18,6 +18,10 @@ from fastapi import Depends, Request
 
 from Chatly.backend.core.errors import DomainError, ErrorCode, UnauthorizedError
 from Chatly.backend.core.jwt import Actor, get_jwt_verifier
+from Chatly.backend.repositories.conversation_repository import (
+    ConversationRepository,
+    get_conversation_repository,
+)
 from Chatly.backend.repositories.profile_repository import (
     ProfileRepository,
     get_profile_repository,
@@ -76,3 +80,13 @@ async def require_verified_actor(
 
 
 VerifiedActor = Annotated[Actor, Depends(require_verified_actor)]
+
+
+def get_conversation_repository_dep() -> ConversationRepository:
+    """Dependencia FastAPI: repositorio de conversaciones (sustituible en pruebas)."""
+    return get_conversation_repository()
+
+
+ConversationRepositoryDep = Annotated[
+    ConversationRepository, Depends(get_conversation_repository_dep)
+]

@@ -10,6 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from Chatly.backend.api.routes.auth import router as auth_router
+from Chatly.backend.api.routes.chat import router as chat_router
 from Chatly.backend.api.routes.health import router as health_router
 from Chatly.backend.api.routes.interests import router as interests_router
 from Chatly.backend.api.routes.profile import router as profile_router
@@ -98,6 +99,7 @@ api_app.add_middleware(
 )
 api_app.include_router(health_router)
 api_app.include_router(auth_router)
+api_app.include_router(chat_router)
 api_app.include_router(interests_router)
 api_app.include_router(profile_router)
 api_app.add_exception_handler(DomainError, domain_error_handler)
