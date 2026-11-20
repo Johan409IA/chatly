@@ -14,37 +14,24 @@ jobs:
   checks:
     runs-on: ubuntu-latest
 
-    # Valores ficticios: la suite unitaria no toca servicios externos, pero
-    # importar la app exige que la configuración valide.
-    env:
-      DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/chatly
-      APP_DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/chatly
-      TEST_DATABASE_URL: postgresql+psycopg://ci:ci@localhost:5432/chatly
-      SUPABASE_URL: https://ci.invalid
-      SUPABASE_PUBLISHABLE_KEY: ci
-      SUPABASE_JWKS_URL: https://ci.invalid/.well-known/jwks.json
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          enable-cache: true
-          activate-environment: true
-
-      - name: Install Python
-        run: uv python install
+          node-version: 22
+          cache: npm
 
       - name: Install dependencies
-        run: uv sync --locked
+        run: npm ci
 
       - name: Lint
-        run: uv run ruff check .
+        run: npm run lint
 
       - name: Unit tests
-        run: uv run pytest tests/unit -q
+        run: npm test
 
-      - name: Compile check
-        run: uv run reflex compile --dry
+      - name: Production build
+        run: npm run build

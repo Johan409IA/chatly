@@ -12,13 +12,24 @@ Sigue `docs/architecture.md` §4.1 y §5.4:
 """
 
 import asyncio
+import json
 from http.cookies import SimpleCookie
+from typing import Any
 
 import reflex as rx
 
 from Chatly.backend.core.jwt import get_jwt_verifier
+from Chatly.backend.core.settings import get_settings
 
 ACCESS_TOKEN_COOKIE = "chatly_at"
+_API_BASE = get_settings().api_public_url.rstrip("/")
+_API_JS = (
+    "const rawApi = '@API_BASE@';"
+    "const apiBase = rawApi"
+    "  ? (() => { const u = new URL(rawApi); u.hostname = window.location.hostname;"
+    "      return u.origin; })()"
+    "  : '';"
+)
 
 
 class SessionState(rx.State):
@@ -27,6 +38,8 @@ class SessionState(rx.State):
     actor_id: str = ""
     alias: str = ""
     email_verified: bool = False
+    is_logging_out: bool = False
+    logout_error: str = ""
 
     @rx.var
     def is_authenticated(self) -> bool:
@@ -78,3 +91,50 @@ class SessionState(rx.State):
                 return []
 
         return []
+
+    @rx.event
+    def logout(self) -> rx.event.EventSpec:
+        """Cierra la sesión por HTTP para revocar y borrar las cookies HttpOnly."""
+        self.is_logging_out = True
+        self.logout_error = ""
+        script = (
+            "(async () => {"
+            + _API_JS.replace("@API_BASE@", _API_BASE)
+            + 'try { const response = await fetch(apiBase + "/api/auth/logout", {'
+            + 'method: "POST", credentials: "include"'
+            + "});"
+            + "const text = await response.text();"
+            + "let body = {};"
+            + "if (text) { try { body = JSON.parse(text); } catch (error) { body = {}; } }"
+            + "return JSON.stringify({status: response.status, body});"
+            + "} catch (error) { return JSON.stringify({status: 0, body: {}}); }"
+            + "})()"
+        )
+        return rx.call_script(script, callback=SessionState.handle_logout_result)
+
+    @rx.event
+    def handle_logout_result(self, result: Any) -> rx.event.EventSpec | list[rx.event.EventSpec]:
+        """Limpia el estado local tras confirmar el cierre desde la API."""
+        try:
+            response = json.loads(result) if isinstance(result, str) else result
+        except ValueError:
+            response = {}
+        if not isinstance(response, dict) or response.get("status") != 204:
+            body = response.get("body", {}) if isinstance(response, dict) else {}
+            error = body.get("error") if isinstance(body, dict) else None
+            message = error.get("message") if isinstance(error, dict) else None
+            self.is_logging_out = False
+            self.logout_error = (
+                message
+                if isinstance(message, str)
+                else "No se pudo cerrar la sesión. Inténtalo de nuevo."
+            )
+            return []
+
+        self.actor_id = ""
+        self.alias = ""
+        self.email_verified = False
+        self.is_logging_out = False
+        self.logout_error = ""
+        # La guarda del login debe leer las cookies ya borradas en una petición nueva.
+        return rx.call_script("window.location.assign('/login')")
