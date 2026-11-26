@@ -39,3 +39,4 @@ Thumbs.db
 /.agents/
 /.commandcode/
 /.env
+.playwright-cli/

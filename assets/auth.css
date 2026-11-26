@@ -439,7 +439,12 @@
   color: #c8d0e6;
   font-size: 0.9rem;
   cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease,
+    transform 0.15s ease,
+    color 0.15s ease;
 }
 
 .chatly-auth__gender:hover {
@@ -448,13 +453,38 @@
 
 .chatly-auth__gender--on {
   border-color: var(--chatly-accent);
-  background: var(--chatly-accent-soft);
-  color: #eaf2ff;
-  box-shadow: 0 0 22px rgba(61, 139, 255, 0.28);
+  background: linear-gradient(180deg, #3d8bff, #2f74e0);
+  color: #ffffff;
+  /* Mismo lenguaje que los intereses: selección inconfundible. */
+  box-shadow:
+    0 0 0 3px rgba(61, 139, 255, 0.22),
+    0 0 26px rgba(61, 139, 255, 0.5);
+  transform: scale(1.04);
 }
 
 .chatly-auth__gender--on .chatly-auth__gender-icon {
-  color: #7cc7ff;
+  color: #ffffff;
+}
+
+.chatly-auth__gender:active {
+  transform: scale(0.97);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chatly-auth__interest,
+  .chatly-auth__gender {
+    transition: none;
+  }
+
+  .chatly-auth__interest--on,
+  .chatly-auth__gender--on {
+    transform: none;
+  }
+
+  .chatly-auth__interest:active,
+  .chatly-auth__gender:active {
+    transform: none;
+  }
 }
 
 /* ------------------------------------------------------------ intereses */
@@ -498,7 +528,13 @@
   line-height: 1.2;
   text-align: center;
   cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  position: relative;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease,
+    transform 0.15s ease,
+    color 0.15s ease;
 }
 
 .chatly-auth__interest:hover {
@@ -507,13 +543,45 @@
 
 .chatly-auth__interest--on {
   border-color: var(--chatly-accent);
-  background: var(--chatly-accent-soft);
-  color: #eaf2ff;
-  box-shadow: 0 0 18px rgba(61, 139, 255, 0.28);
+  background: linear-gradient(180deg, #3d8bff, #2f74e0);
+  color: #ffffff;
+  /* Selección inconfundible: fondo sólido, anillo y glow doble. */
+  box-shadow:
+    0 0 0 3px rgba(61, 139, 255, 0.22),
+    0 0 26px rgba(61, 139, 255, 0.5);
+  transform: scale(1.06);
 }
 
 .chatly-auth__interest--on .chatly-auth__interest-icon {
-  color: #7cc7ff;
+  color: #ffffff;
+}
+
+.chatly-auth__interest:active {
+  transform: scale(0.97);
+}
+
+.chatly-auth__interest:focus-visible {
+  outline: none;
+  border-color: var(--chatly-accent);
+  box-shadow: 0 0 0 3px rgba(61, 139, 255, 0.3);
+}
+
+/* Marca de selección en la esquina de la tarjeta. */
+.chatly-auth__interest-check {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #1f6beb;
+}
+
+.chatly-auth__interest {
+  position: relative;
 }
 
 /* ------------------------------------------------------------ responsive */

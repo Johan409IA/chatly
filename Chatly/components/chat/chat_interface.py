@@ -295,7 +295,7 @@ def _conversation_list() -> rx.Component:
 
 def _message(message: MessageItem) -> rx.Component:
     is_own_message = message.author_id == SessionState.actor_id
-    return rx.box(
+    return rx.hstack(
         rx.cond(
             message.message_type == "system",
             rx.text(
@@ -305,6 +305,27 @@ def _message(message: MessageItem) -> rx.Component:
             ),
             rx.vstack(
                 rx.cond(
+                    (message.reply_alias != "") | (message.reply_preview != ""),
+                    rx.vstack(
+                        rx.text(
+                            rx.cond(
+                                message.reply_alias != "",
+                                "Respondiendo a @" + message.reply_alias,
+                                "Respondiendo",
+                            ),
+                            class_name="chatly-chat__reply-quote-author",
+                        ),
+                        rx.text(
+                            message.reply_preview,
+                            class_name="chatly-chat__reply-quote-preview",
+                        ),
+                        class_name="chatly-chat__reply-quote",
+                        align="start",
+                        spacing="0",
+                    ),
+                    rx.fragment(),
+                ),
+                rx.cond(
                     is_own_message | (message.author_alias == ""),
                     rx.fragment(),
                     rx.text(
@@ -313,7 +334,16 @@ def _message(message: MessageItem) -> rx.Component:
                     ),
                 ),
                 rx.text(message.content, class_name="chatly-chat__message-content"),
-                rx.text(message.created_at, class_name="chatly-chat__message-time"),
+                rx.hstack(
+                    rx.text(message.created_at, class_name="chatly-chat__message-time"),
+                    rx.cond(
+                        is_own_message,
+                        rx.icon("check", size=13, class_name="chatly-chat__message-status"),
+                        rx.fragment(),
+                    ),
+                    spacing="1",
+                    align="center",
+                ),
                 class_name=rx.cond(
                     is_own_message,
                     "chatly-chat__message-bubble chatly-chat__message-bubble--own",
@@ -322,6 +352,23 @@ def _message(message: MessageItem) -> rx.Component:
                 align=rx.cond(is_own_message, "end", "start"),
                 spacing="1",
             ),
+        ),
+        rx.cond(
+            (message.message_type == "text") & (~message.deleted),
+            rx.tooltip(
+                rx.button(
+                    rx.icon("corner_up_left", size=15),
+                    on_click=ConversationState.start_reply(
+                        message.id, message.author_alias, message.content
+                    ),
+                    class_name="chatly-chat__message-action",
+                    variant="ghost",
+                    type="button",
+                    aria_label="Responder a este mensaje",
+                ),
+                content="Responder",
+            ),
+            rx.fragment(),
         ),
         class_name=rx.cond(
             message.message_type == "system",
@@ -332,6 +379,106 @@ def _message(message: MessageItem) -> rx.Component:
                 "chatly-chat__message-row",
             ),
         ),
+        width="100%",
+        align="center",
+        spacing="2",
+    )
+
+
+def _pending_bubble() -> rx.Component:
+    """Envío optimista: burbuja propia con reloj hasta la confirmación."""
+    return rx.cond(
+        ConversationState.pending_message != "",
+        rx.box(
+            rx.vstack(
+                rx.text(
+                    ConversationState.pending_message,
+                    class_name="chatly-chat__message-content",
+                ),
+                rx.hstack(
+                    rx.icon("clock", size=12, class_name="chatly-chat__message-pending"),
+                    rx.text(
+                        "Enviando…",
+                        class_name="chatly-chat__message-pending",
+                    ),
+                    spacing="1",
+                    align="center",
+                ),
+                class_name=(
+                    "chatly-chat__message-bubble chatly-chat__message-bubble--own"
+                    " chatly-chat__message-bubble--pending"
+                ),
+                align="end",
+                spacing="1",
+            ),
+            class_name="chatly-chat__message-row chatly-chat__message-row--own",
+            width="100%",
+        ),
+        rx.fragment(),
+    )
+
+
+def _load_older_button() -> rx.Component:
+    """Paginación hacia atrás: los 30 mensajes anteriores (Q94)."""
+    return rx.cond(
+        ConversationState.has_older_messages,
+        rx.center(
+            rx.button(
+                rx.cond(
+                    ConversationState.is_loading_older,
+                    rx.spinner(size="2"),
+                    "Cargar mensajes anteriores",
+                ),
+                on_click=ConversationState.load_older_messages,
+                class_name="chatly-chat__load-older",
+                variant="ghost",
+                type="button",
+                disabled=ConversationState.is_loading_older,
+            ),
+            width="100%",
+        ),
+        rx.fragment(),
+    )
+
+
+def _reply_chip() -> rx.Component:
+    """Chip de la respuesta en curso sobre el compositor (Q75)."""
+    return rx.cond(
+        ConversationState.reply_to_id != "",
+        rx.hstack(
+            rx.icon("corner_up_left", size=15, class_name="chatly-chat__reply-chip-icon"),
+            rx.vstack(
+                rx.text(
+                    rx.cond(
+                        ConversationState.reply_to_alias != "",
+                        "Respondiendo a @" + ConversationState.reply_to_alias,
+                        "Respondiendo",
+                    ),
+                    class_name="chatly-chat__reply-chip-author",
+                ),
+                rx.text(
+                    ConversationState.reply_to_preview,
+                    class_name="chatly-chat__reply-chip-preview",
+                ),
+                align="start",
+                spacing="0",
+                min_width="0",
+            ),
+            rx.spacer(),
+            rx.button(
+                rx.icon("x", size=15),
+                on_click=ConversationState.cancel_reply,
+                class_name="chatly-chat__reply-chip-cancel",
+                variant="ghost",
+                type="button",
+                aria_label="Cancelar respuesta",
+            ),
+            class_name="chatly-chat__reply-chip",
+            width="100%",
+            align="center",
+            spacing="3",
+        ),
+        rx.fragment(),
     )
 
 
@@ -412,7 +559,9 @@ def _active_conversation() -> rx.Component:
                 rx.cond(
                     ConversationState.messages.length() > 0,
                     rx.vstack(
+                        _load_older_button(),
                         rx.foreach(ConversationState.messages, _message),
+                        _pending_bubble(),
                         class_name="chatly-chat__messages",
                         spacing="3",
                         width="100%",
@@ -435,6 +584,7 @@ def _active_conversation() -> rx.Component:
             ),
         ),
         rx.form(
+            _reply_chip(),
             rx.hstack(
                 rx.text_area(
                     value=ConversationState.message_draft,

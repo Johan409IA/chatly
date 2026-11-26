@@ -241,6 +241,11 @@ def _interest_card(interest: rx.Var[InterestItem]) -> rx.Component:
     """Tarjeta clicable de un interés; resaltada si está seleccionada."""
     selected = AuthState.selected_interest_ids.contains(interest.id)
     return rx.box(
+        rx.cond(
+            selected,
+            rx.icon("check", size=12, class_name="chatly-auth__interest-check"),
+            rx.fragment(),
+        ),
         _icon(interest.name),
         rx.text(interest.name, size="1"),
         class_name=rx.cond(
