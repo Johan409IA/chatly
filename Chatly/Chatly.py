@@ -30,8 +30,10 @@ from Chatly.pages.auth.register import register_page
 from Chatly.pages.auth.reset_password import reset_password_page
 from Chatly.pages.auth.verify_pending import verify_pending_page
 from Chatly.pages.conversations.page import conversations_page
+from Chatly.pages.profile.page import profile_page
 from Chatly.state.auth_state import AuthState
 from Chatly.state.conversation_state import ConversationState
+from Chatly.state.profile_state import ProfileState
 from Chatly.state.session_state import SessionState
 
 # El logging JSON se configura antes de crear la app;
@@ -97,7 +99,7 @@ api_app.add_exception_handler(DomainError, domain_error_handler)
 api_app.add_exception_handler(RequestValidationError, validation_exception_handler)
 api_app.add_exception_handler(Exception, unhandled_exception_handler)
 
-app = rx.App(api_transformer=api_app, stylesheets=["auth.css", "chat.css"])
+app = rx.App(api_transformer=api_app, stylesheets=["auth.css", "chat.css", "profile.css"])
 # Página protegida: sin sesión válida, la guarda redirige a /login.
 app.add_page(
     index,
@@ -118,6 +120,17 @@ app.add_page(
         SessionState.guard_page,
         ConversationState.load_profile,
         ConversationState.load_conversations,
+    ],
+)
+app.add_page(
+    profile_page,
+    route="/profile",
+    title="Tu perfil | Chatly",
+    image=APP_ICON,
+    on_load=[
+        SessionState.guard_page,
+        ProfileState.load_profile,
+        ProfileState.load_catalog,
     ],
 )
 # Pantallas de autenticación (públicas; login redirige si ya hay sesión).

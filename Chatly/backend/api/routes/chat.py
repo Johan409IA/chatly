@@ -15,6 +15,4 @@ async def list_conversations(
     include_hidden: bool = False,
 ) -> ConversationList:
     """Conversaciones del actor por último mensaje descendente (§7.1)."""
-    return await repository.list_conversations(
-        str(actor.id), include_hidden=include_hidden
-    )
+    return await repository.list_conversations(str(actor.id), include_hidden=include_hidden)

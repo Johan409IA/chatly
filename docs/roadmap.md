@@ -217,7 +217,7 @@ Se conserva el calendario base y la fecha de entrega. La funcionalidad social se
 - [x] Implementar normalización del correo y búsqueda exacta sin exponerlo en resultados. <!-- GET /api/users/search con app.buscar_usuario_por_correo; nunca devuelve el correo -->
 - [x] Implementar alias único, formato 3–20 caracteres y normalización case-insensitive. <!-- check en 0002 + validadores de schemas/auth.py reutilizados en PATCH /api/me -->
 - [x] Implementar cambio de alias con periodo de espera de 30 días y auditoría. <!-- cooldown con alias_is_changeable en profile_repository; la auditoría llega con audit_logs en la Iteración 8 -->
-- [ ] Crear pantallas en español: registro, login, confirmación pendiente, reenvío, recuperación y perfil.
+- [x] Crear pantallas en español: registro, login, confirmación pendiente, reenvío, recuperación y perfil. <!-- pantallas de auth existentes; perfil añadido en /profile con datos, intereses y visibilidad -->
 - [x] Crear pruebas de confirmación bloqueante, expiración de sesión, alias duplicado y privacidad del correo. <!-- test_auth_api, test_deps y test_profile_api -->
 
 ### Nuevas tareas de intereses y visibilidad personal
@@ -228,11 +228,11 @@ Se conserva el calendario base y la fecha de entrega. La funcionalidad social se
 - [x] Añadir la configuración `visibilidad_publica` al perfil, activada por defecto e independiente de la visibilidad de los grupos. <!-- columna en 0005b_intereses; la UI llega con 0013 -->
 - [x] Permitir seleccionar intereses durante el registro, sin obligar al usuario a elegir ninguno. <!-- bloque opcional en /register -->
 - [x] Presentar las categorías de forma expandible y los intereses concretos como etiquetas seleccionables. <!-- accordion por categoría con contador N/10 en /register -->
-- [ ] Permitir modificar los intereses desde el perfil y mostrar el límite de selección (por ejemplo, `3/10`). <!-- PUT /api/me/interests listo; falta la pantalla del perfil -->
-- [ ] Permitir desactivar/activar la visibilidad pública desde los ajustes. <!-- PATCH /api/me acepta is_public; falta la pantalla -->
-- [ ] Definir las respuestas del perfil público: mostrar todos los intereses únicamente cuando la visibilidad pública esté activada; ocultarlos cuando esté desactivada.
+- [x] Permitir modificar los intereses desde el perfil y mostrar el límite de selección (por ejemplo, `3/10`). <!-- pantalla /profile con PUT /api/me/interests y contador N/10 -->
+- [x] Permitir desactivar/activar la visibilidad pública desde los ajustes. <!-- sección «Ajustes de visibilidad» en /profile con PATCH /api/me -->
+- [x] Definir las respuestas del perfil público: mostrar todos los intereses únicamente cuando la visibilidad pública esté activada; ocultarlos cuando esté desactivada. <!-- definido en api-contracts.md §3.3 y §5.5 (ProfilePublic) -->
 - [x] Mantener la búsqueda directa por alias/correo aunque la visibilidad pública esté desactivada; nunca devolver el correo en los resultados. <!-- GET /api/users/search ignora visibilidad y no expone el correo -->
-- [ ] Asegurar que no se recomiende a usuarios sin intereses configurados.
+- [ ] Asegurar que no se recomiende a usuarios sin intereses configurados. <!-- se implementa con Descubrir (Iteración 8, §A); la regla ya está en api-contracts.md (solo con al menos un interés) -->
 - [x] Añadir pruebas para selección opcional, máximo de diez, edición de intereses y visibilidad independiente. <!-- tests/unit/test_profile_api.py -->
 
 ### Entregables

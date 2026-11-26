@@ -6,18 +6,22 @@ from Chatly.state.conversation_state import ConversationItem, ConversationState,
 from Chatly.state.session_state import SessionState
 
 
-def _navigation_item(icon: str, label: str, active: bool = False) -> rx.Component:
+def _navigation_item(icon: str, label: str, active: bool = False, href: str = "") -> rx.Component:
     content = rx.vstack(
         rx.icon(icon, size=21),
         rx.text(label, class_name="chatly-chat__nav-label"),
         align="center",
         spacing="1",
     )
-    if active:
+    if active or href:
         return rx.link(
             content,
-            href="/conversations",
-            class_name="chatly-chat__nav-item chatly-chat__nav-item--active",
+            href=href or "/conversations",
+            class_name=rx.cond(
+                active,
+                "chatly-chat__nav-item chatly-chat__nav-item--active",
+                "chatly-chat__nav-item",
+            ),
             aria_label=label,
         )
     return rx.button(
@@ -46,7 +50,7 @@ def _navigation_rail() -> rx.Component:
             _navigation_item("messages_square", "Chats", active=True),
             _navigation_item("users_round", "Comunidades"),
             _navigation_item("users", "Amigos"),
-            _navigation_item("user_round", "Perfil"),
+            _navigation_item("user_round", "Perfil", href="/profile"),
             _navigation_item("settings", "Ajustes"),
             class_name="chatly-chat__navigation",
             spacing="2",

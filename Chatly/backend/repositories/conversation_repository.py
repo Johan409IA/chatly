@@ -138,9 +138,7 @@ class ConversationRepository:
             )
             for row in rows
         ]
-        return ConversationList(
-            items=items, total_unread=sum(item.unread_count for item in items)
-        )
+        return ConversationList(items=items, total_unread=sum(item.unread_count for item in items))
 
 
 @lru_cache

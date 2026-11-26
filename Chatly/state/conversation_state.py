@@ -8,16 +8,7 @@ from urllib.parse import quote
 
 import reflex as rx
 
-from Chatly.backend.core.settings import get_settings
-
-_API_BASE = get_settings().api_public_url.rstrip("/")
-_API_JS = (
-    "const rawApi = '@API_BASE@';"
-    "const apiBase = rawApi"
-    "  ? (() => { const u = new URL(rawApi); u.hostname = window.location.hostname;"
-    "      return u.origin; })()"
-    "  : '';"
-)
+from Chatly.state.api_client import fetch_script, parse_response
 
 _MAX_MESSAGE_LENGTH = 4000
 
@@ -47,41 +38,6 @@ class MessageItem:
     created_at: str
     message_type: str
     deleted: bool
-
-
-def _fetch_script(
-    path: str,
-    *,
-    method: str = "GET",
-    payload: dict[str, object] | None = None,
-    request_id: str = "",
-) -> str:
-    """Ejecuta REST desde el navegador para incluir la cookie HttpOnly."""
-    options = [
-        f"method: {json.dumps(method)}",
-        'headers: {"Content-Type": "application/json"}',
-        'credentials: "include"',
-    ]
-    if payload is not None:
-        options.append(f"body: JSON.stringify({json.dumps(payload)})")
-    return (
-        "(async () => {"
-        + _API_JS.replace("@API_BASE@", _API_BASE)
-        + f"const requestId = {json.dumps(request_id)};"
-        + f"const path = {json.dumps(path)};"
-        + "try {"
-        + "const response = await fetch(apiBase + path, {"
-        + ",".join(options)
-        + "});"
-        + "const text = await response.text();"
-        + "let body = {};"
-        + "if (text) { try { body = JSON.parse(text); } catch (error) { body = {}; } }"
-        + "return JSON.stringify({status: response.status, body, request_id: requestId});"
-        + "} catch (error) {"
-        + "return JSON.stringify({status: 0, body: {}, request_id: requestId});"
-        + "}"
-        + "})()"
-    )
 
 
 class ConversationState(rx.State):
@@ -145,7 +101,7 @@ class ConversationState(rx.State):
         """Carga el nombre y el avatar del actor desde `GET /api/me`."""
         self.profile_error = ""
         return rx.call_script(
-            _fetch_script("/api/me"),
+            fetch_script("/api/me"),
             callback=ConversationState.handle_profile_result,
         )
 
@@ -174,7 +130,7 @@ class ConversationState(rx.State):
         self.is_loading_conversations = True
         self.list_error = ""
         return rx.call_script(
-            _fetch_script("/api/conversations"),
+            fetch_script("/api/conversations"),
             callback=ConversationState.handle_conversations_result,
         )
 
@@ -270,13 +226,13 @@ class ConversationState(rx.State):
             f"/api/conversations/{quote(self.selected_conversation_id, safe='')}/messages?limit=50"
         )
         return rx.call_script(
-            _fetch_script(path, request_id=self.selected_conversation_id),
+            fetch_script(path, request_id=self.selected_conversation_id),
             callback=ConversationState.handle_messages_result,
         )
 
     @rx.event
     def handle_messages_result(self, result: Any) -> list[rx.event.EventSpec] | rx.event.EventSpec:
-        status, body, request_id = self._parse_response(result)
+        status, body, request_id = parse_response(result)
         if request_id != self.selected_conversation_id:
             return []
         self.is_loading_messages = False
@@ -346,7 +302,7 @@ class ConversationState(rx.State):
         self.messages_error = ""
         path = f"/api/conversations/{quote(self.selected_conversation_id, safe='')}/messages"
         return rx.call_script(
-            _fetch_script(
+            fetch_script(
                 path,
                 method="POST",
                 payload={
@@ -364,7 +320,7 @@ class ConversationState(rx.State):
 
     @rx.event
     def handle_send_result(self, result: Any) -> list[rx.event.EventSpec] | rx.event.EventSpec:
-        status, body, request_id = self._parse_response(result)
+        status, body, request_id = parse_response(result)
         if request_id != self.selected_conversation_id:
             return []
         self.is_sending = False
@@ -399,30 +355,8 @@ class ConversationState(rx.State):
         self.is_loading_messages = True
         path = f"/api/conversations/{quote(conversation.id, safe='')}/messages?limit=50"
         return rx.call_script(
-            _fetch_script(path, request_id=conversation.id),
+            fetch_script(path, request_id=conversation.id),
             callback=ConversationState.handle_messages_result,
-        )
-
-    @staticmethod
-    def _parse_response(result: Any) -> tuple[int, dict[str, Any], str]:
-        if isinstance(result, str):
-            try:
-                decoded = json.loads(result)
-            except ValueError:
-                return 0, {}, ""
-        elif isinstance(result, dict):
-            decoded = result
-        else:
-            return 0, {}, ""
-        if not isinstance(decoded, dict):
-            return 0, {}, ""
-        status = decoded.get("status")
-        body = decoded.get("body")
-        request_id = decoded.get("request_id")
-        return (
-            status if isinstance(status, int) else 0,
-            body if isinstance(body, dict) else {},
-            request_id if isinstance(request_id, str) else "",
         )
 
     @staticmethod
