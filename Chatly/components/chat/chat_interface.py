@@ -2,7 +2,12 @@
 
 import reflex as rx
 
-from Chatly.state.conversation_state import ConversationItem, ConversationState, MessageItem
+from Chatly.state.conversation_state import (
+    ConversationItem,
+    ConversationState,
+    MessageItem,
+    UserItem,
+)
 from Chatly.state.session_state import SessionState
 
 
@@ -132,6 +137,55 @@ def _conversation_row(conversation: ConversationItem) -> rx.Component:
     )
 
 
+def _user_row(user: UserItem) -> rx.Component:
+    """Resultado de búsqueda de personas (§6.1): inicia un chat privado."""
+    return rx.button(
+        rx.hstack(
+            _avatar(user.initials, user.avatar_url, "2.5rem"),
+            rx.vstack(
+                rx.text(user.display_name, class_name="chatly-chat__conversation-name"),
+                rx.text(
+                    rx.cond(user.alias != "", "@" + user.alias, "Sin alias visible"),
+                    class_name="chatly-chat__conversation-preview",
+                ),
+                spacing="0",
+                align="start",
+                min_width="0",
+                flex="1",
+            ),
+            width="100%",
+            align="center",
+            spacing="3",
+        ),
+        on_click=ConversationState.select_user(
+            user.id, user.alias, user.display_name, user.avatar_url
+        ),
+        class_name="chatly-chat__conversation",
+        variant="ghost",
+        width="100%",
+        type="button",
+    )
+
+
+def _people_results() -> rx.Component:
+    """Personas encontradas por alias mientras se escribe (Q112)."""
+    return rx.cond(
+        ConversationState.is_searching_users,
+        rx.text("Buscando personas…", class_name="chatly-chat__searching-users"),
+        rx.cond(
+            ConversationState.has_user_results,
+            rx.vstack(
+                rx.text("PERSONAS", class_name="chatly-chat__section-label"),
+                rx.foreach(ConversationState.user_results, _user_row),
+                spacing="1",
+                width="100%",
+                class_name="chatly-chat__people-section",
+            ),
+            rx.fragment(),
+        ),
+    )
+
+
 def _conversation_list() -> rx.Component:
     return rx.box(
         rx.hstack(
@@ -155,12 +209,13 @@ def _conversation_list() -> rx.Component:
             rx.input(
                 value=ConversationState.search_query,
                 on_change=ConversationState.set_search_query,
-                placeholder="Buscar conversación",
-                aria_label="Buscar conversación",
+                placeholder="Buscar chats o personas",
+                aria_label="Buscar conversaciones o personas",
                 class_name="chatly-chat__search-input",
             ),
             class_name="chatly-chat__search",
         ),
+        _people_results(),
         rx.hstack(
             rx.text("MENSAJES", class_name="chatly-chat__section-label"),
             rx.spacer(),
@@ -514,16 +569,32 @@ def _active_conversation() -> rx.Component:
                 aria_label="Volver a conversaciones",
             ),
             _avatar(
-                ConversationState.selected_conversation_initials,
-                ConversationState.selected_conversation_avatar_url,
+                rx.cond(
+                    ConversationState.selected_conversation_id != "",
+                    ConversationState.selected_conversation_initials,
+                    ConversationState.selected_recipient_initials,
+                ),
+                rx.cond(
+                    ConversationState.selected_conversation_id != "",
+                    ConversationState.selected_conversation_avatar_url,
+                    ConversationState.selected_recipient_avatar_url,
+                ),
             ),
             rx.vstack(
                 rx.text(
-                    ConversationState.selected_conversation_name,
+                    rx.cond(
+                        ConversationState.selected_conversation_id != "",
+                        ConversationState.selected_conversation_name,
+                        ConversationState.selected_recipient_name,
+                    ),
                     class_name="chatly-chat__active-name",
                 ),
                 rx.text(
-                    "Conversación de Chatly",
+                    rx.cond(
+                        ConversationState.selected_conversation_id != "",
+                        "Conversación de Chatly",
+                        "Chat nuevo: el primer mensaje inicia la conversación",
+                    ),
                     class_name="chatly-chat__active-caption",
                 ),
                 align="start",
@@ -632,15 +703,27 @@ def _conversation_info() -> rx.Component:
     return rx.box(
         rx.text("Información", class_name="chatly-chat__info-title"),
         rx.cond(
-            ConversationState.selected_conversation_id != "",
+            ConversationState.has_selected_chat,
             rx.vstack(
                 _avatar(
-                    ConversationState.selected_conversation_initials,
-                    ConversationState.selected_conversation_avatar_url,
+                    rx.cond(
+                        ConversationState.selected_conversation_id != "",
+                        ConversationState.selected_conversation_initials,
+                        ConversationState.selected_recipient_initials,
+                    ),
+                    rx.cond(
+                        ConversationState.selected_conversation_id != "",
+                        ConversationState.selected_conversation_avatar_url,
+                        ConversationState.selected_recipient_avatar_url,
+                    ),
                     "5.5rem",
                 ),
                 rx.text(
-                    ConversationState.selected_conversation_name,
+                    rx.cond(
+                        ConversationState.selected_conversation_id != "",
+                        ConversationState.selected_conversation_name,
+                        ConversationState.selected_recipient_name,
+                    ),
                     class_name="chatly-chat__info-name",
                 ),
                 rx.cond(
@@ -682,7 +765,7 @@ def chat_interface() -> rx.Component:
         _conversation_list(),
         rx.box(
             rx.cond(
-                ConversationState.selected_conversation_id != "",
+                ConversationState.has_selected_chat,
                 _active_conversation(),
                 _empty_conversation(),
             ),
@@ -690,7 +773,7 @@ def chat_interface() -> rx.Component:
         ),
         _conversation_info(),
         class_name=rx.cond(
-            ConversationState.selected_conversation_id != "",
+            ConversationState.has_selected_chat,
             "chatly-chat chatly-chat--conversation-open",
             "chatly-chat",
         ),
