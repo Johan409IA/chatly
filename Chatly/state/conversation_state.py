@@ -125,7 +125,7 @@ class ConversationState(rx.State):
 
     @rx.event
     def handle_profile_result(self, result: Any) -> list[rx.event.EventSpec] | rx.event.EventSpec:
-        status, body, _ = self._parse_response(result)
+        status, body, _ = parse_response(result)
         if status != 200:
             self.profile_error = self._error_message(body, status)
             if status == 401:
@@ -157,7 +157,7 @@ class ConversationState(rx.State):
         self, result: Any
     ) -> list[rx.event.EventSpec] | rx.event.EventSpec:
         self.is_loading_conversations = False
-        status, body, _ = self._parse_response(result)
+        status, body, _ = parse_response(result)
         if status != 200:
             self.list_error = self._error_message(body, status)
             if status == 401:
