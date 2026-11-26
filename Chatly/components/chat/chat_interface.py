@@ -39,12 +39,12 @@ def _navigation_rail() -> rx.Component:
     return rx.box(
         rx.box(
             rx.image(
-                src="/icons/chatly_mark.png",
-                alt="R",
+                src="/icons/chatly_logo.png",
+                alt="Chatly",
                 class_name="chatly-chat__rail-logo",
             ),
             class_name="chatly-chat__rail-brand",
-            aria_label="R",
+            aria_label="Chatly",
         ),
         rx.vstack(
             _navigation_item("messages_square", "Chats", active=True),
@@ -136,8 +136,8 @@ def _conversation_list() -> rx.Component:
     return rx.box(
         rx.hstack(
             rx.image(
-                src="/icons/chatly_mark.png",
-                alt="R",
+                src="/icons/chatly_logo.png",
+                alt="Chatly",
                 class_name="chatly-chat__brand-logo",
             ),
             rx.spacer(),

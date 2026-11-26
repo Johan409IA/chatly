@@ -118,8 +118,8 @@ def brand_panel() -> rx.Component:
         network_graph(),
         rx.box(
             rx.image(
-                src="/icons/chatly_mark.png",
-                alt="R",
+                src="/icons/chatly_logo.png",
+                alt="Chatly",
                 class_name="chatly-auth__logo",
             ),
             class_name="chatly-auth__wordmark-wrap",
