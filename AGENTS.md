@@ -85,6 +85,7 @@ Chatly: app web responsive de mensajería (español) con chats privados/grupales
 - Usar nombres en español para las tablas y campos de la base de datos, y para los modelos Pydantic y SQLAlchemy. Usar nombres en inglés para las clases de Python, funciones, variables y métodos.
 - Usar playwright cli para pruebas end-to-end (E2E) de la UI. No usar Selenium ni Cypress, cuando sea necesario.
 - Usa context7-cli para consultar la documentación de las tecnologías que vas a usar y tienes alguna duda, puedes usar su skill también y la de find-docs. Asi para que no tengas que consultar desde la web. Usa el comando ctx7 no el de npx.
+- Si vas a realizar commit puedes usar  el  -m " " para hacer el comentario en lugar de crear un archivo temporal.
 
 ## Memoria
 

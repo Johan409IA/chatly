@@ -3,7 +3,7 @@
 Memoria del proyecto entre sesiones de agente. Máximo ~50 líneas.
 
 ## Estado actual
-- **Desplegada en Render (2026-11-14)**: https://chatly-3lh3.onrender.com — servicio `srv-dbsdbjdg1s2s73es70cg` (Docker, plan Free, proyecto `chatly`, rama `main`, auto-deploy por commit). Verificado: `/api/health`, `/api/interests`, `/login`, `/register` y eventos por websocket (Playwright). `FRONTEND_URL`/`CORS_ORIGINS` se derivan de `RENDER_EXTERNAL_URL` (`settings.py`). Badge «Built with Reflex» desactivado con `show_built_with_reflex=False` en `rxconfig.py` (se lee al compilar: requiere redeploy). **Pendiente en Supabase**: Site URL y Redirect URL `https://chatly-3lh3.onrender.com/auth/confirm`.
+- **Desplegada en Render (2026-11-26)**: https://chatly-3lh3.onrender.com — servicio `srv-dbsdbjdg1s2s73es70cg` (Docker, plan Free, proyecto `chatly`, rama `main`, auto-deploy por commit). Verificado: `/api/health`, `/api/interests`, `/login`, `/register` y eventos por websocket (Playwright). `FRONTEND_URL`/`CORS_ORIGINS` se derivan de `RENDER_EXTERNAL_URL` (`settings.py`). Badge «Built with Reflex» desactivado con `show_built_with_reflex=False` en `rxconfig.py` (se lee al compilar: requiere redeploy). **Pendiente en Supabase**: probar el ciclo completo de recuperación con la plantilla nueva (token_hash). **Error de build aprendido**: los `.css` de `assets/` NO admiten encabezado `#` (lightningcss lo lee como selector vacío y `reflex export` falla en el build de Docker); usar `/* */`.
 - **Iteración 1 (arquitectura de backend) completa y verificada** en `arquitectura-backend`.
 - **Iteración 2, tareas 1–6 hechas** (Supabase Auth, JWT/JWKS, guardas Reflex). Correos reales de Brevo **pendientes**.
 - **Frontend de conversaciones integrado (2026-11-26, commit `7fff538` en develop)**: trabajo de Kevin desde `frontend-conversacion` (`chat_interface.py`, `conversation_state.py`, logout HTTP, `chat.css`). La rama traía contaminación (app Next.js y duplicados en la raíz) que se excluyó. **Pendiente**: el frontend llama a `GET/POST /api/conversations/{id}/messages`, que no existen aún (Iteración 4); unificar `load_profile` de `ConversationState` con `SessionState`.
@@ -81,7 +81,7 @@ Memoria del proyecto entre sesiones de agente. Máximo ~50 líneas.
 - **En Windows, el worker de granian muere al recargar** (`ModuleNotFoundError: No module named 'fastapi'`): el backend queda caído y los eventos por WebSocket dejan de llegar (parece un bug de estado). Reiniciar `uv run reflex run` y recargar la página.
 
 ## Próximos pasos
-- Configurar la plantilla «Reset password» de Supabase (flujo `token_hash`, ver arriba) y probar el ciclo completo de recuperación con la cuenta de prueba.
+- Probar el ciclo completo de recuperación en producción (plantilla «Reset password» ya configurada con `token_hash`): forgot-password → correo → nueva contraseña → login.
 - Probar alta con correo real (Brevo + plantilla Supabase) y Redirect URL `/auth/confirm`; usar una cuenta de prueba y limpiarla.
 - Revisión de la migración y su RLS por dos integrantes (pendiente, regla de AGENTS.md).
 - Middleware de rate limit (§14) y endpoints sociales pendientes.
