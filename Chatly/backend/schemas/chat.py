@@ -138,8 +138,10 @@ class MembershipCreated(BaseModel):
 
 
 # ---------- Cuerpos de petición ----------
+# El límite de 4.000 caracteres (Q51) lo aplica el repositorio para responder
+# `message_too_long` (§8.2) en lugar de un `validation_error` genérico.
 class SendMessageBody(BaseModel):
-    content: str = Field(min_length=1, max_length=4000)
+    content: str = Field(min_length=1)
     client_message_id: UUID | None = None
     reply_to_message_id: UUID | None = None
 
@@ -151,7 +153,7 @@ class SendMessageResponse(BaseModel):
 
 class DirectMessageBody(BaseModel):
     recipient_id: UUID
-    content: str = Field(min_length=1, max_length=4000)
+    content: str = Field(min_length=1)
     client_message_id: UUID | None = None
 
 
