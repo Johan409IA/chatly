@@ -42,6 +42,17 @@ class MessageItem:
     reply_preview: str = ""
 
 
+@dataclass(frozen=True)
+class UserItem:
+    """Resultado de la búsqueda de usuarios (§6.1): nunca incluye el correo."""
+
+    id: str
+    alias: str
+    display_name: str
+    initials: str
+    avatar_url: str
+
+
 class ConversationState(rx.State):
     """Datos visibles de la lista y de la conversación seleccionada."""
 
@@ -76,6 +87,16 @@ class ConversationState(rx.State):
     # Envío optimista: el texto se muestra con reloj mientras el servidor
     # responde; al confirmar se recarga el historial y aparece con ✓.
     pending_message: str = ""
+    # Búsqueda de personas (§6.1) y chat aún sin conversación persistida
+    # (Q146): el primer mensaje crea la conversación vía
+    # `POST /api/messages/direct`.
+    user_results: list[UserItem] = []
+    is_searching_users: bool = False
+    selected_recipient_id: str = ""
+    selected_recipient_alias: str = ""
+    selected_recipient_name: str = ""
+    selected_recipient_initials: str = "CH"
+    selected_recipient_avatar_url: str = ""
 
     @rx.var
     def filtered_conversations(self) -> list[ConversationItem]:
@@ -96,6 +117,15 @@ class ConversationState(rx.State):
     @rx.var
     def has_older_messages(self) -> bool:
         return self.cursor_id != ""
+
+    @rx.var
+    def has_selected_chat(self) -> bool:
+        """Hay panel de conversación: conversación abierta o chat nuevo."""
+        return self.selected_conversation_id != "" or self.selected_recipient_id != ""
+
+    @rx.var
+    def has_user_results(self) -> bool:
+        return bool(self.user_results)
 
     @rx.var
     def can_send_message(self) -> bool:
@@ -236,6 +266,11 @@ class ConversationState(rx.State):
         self.cursor_id = ""
         self.cancel_reply()
         self.pending_message = ""
+        self.selected_recipient_id = ""
+        self.selected_recipient_alias = ""
+        self.selected_recipient_name = ""
+        self.selected_recipient_initials = "CH"
+        self.selected_recipient_avatar_url = ""
 
     @rx.event
     def load_messages(self) -> rx.event.EventSpec | list:
@@ -391,7 +426,7 @@ class ConversationState(rx.State):
     def send_message(self, _form_data: dict | None = None) -> rx.event.EventSpec | list:
         """Envía un texto y vuelve a leerlo del backend para mostrar el estado real."""
         content = self.message_draft.strip()
-        if not self.selected_conversation_id:
+        if not self.selected_conversation_id and not self.selected_recipient_id:
             self.messages_error = "Selecciona una conversación para enviar un mensaje."
             return []
         if not content:
@@ -409,15 +444,21 @@ class ConversationState(rx.State):
             "content": content,
             "client_message_id": "__GENERATE_UUID__",
         }
-        if self.reply_to_id:
-            payload["reply_to_message_id"] = self.reply_to_id
-        path = f"/api/conversations/{quote(self.selected_conversation_id, safe='')}/messages"
+        if self.selected_conversation_id:
+            if self.reply_to_id:
+                payload["reply_to_message_id"] = self.reply_to_id
+            path = f"/api/conversations/{quote(self.selected_conversation_id, safe='')}/messages"
+        else:
+            # Primer mensaje de un chat nuevo (§7.2.1, Q146): el servidor
+            # crea la conversación y las membresías en la misma transacción.
+            payload["recipient_id"] = self.selected_recipient_id
+            path = "/api/messages/direct"
         return rx.call_script(
             fetch_script(
                 path,
                 method="POST",
                 payload=payload,
-                request_id=self.selected_conversation_id,
+                request_id=self.selected_conversation_id or self.selected_recipient_id,
             ).replace(
                 json.dumps("__GENERATE_UUID__"),
                 "crypto.randomUUID()",
@@ -428,7 +469,7 @@ class ConversationState(rx.State):
     @rx.event
     def handle_send_result(self, result: Any) -> list[rx.event.EventSpec] | rx.event.EventSpec:
         status, body, request_id = parse_response(result)
-        if request_id != self.selected_conversation_id:
+        if request_id != self.selected_conversation_id and request_id != self.selected_recipient_id:
             return []
         self.is_sending = False
         self.pending_message = ""
@@ -443,11 +484,132 @@ class ConversationState(rx.State):
             return []
         self.message_draft = ""
         self.cancel_reply()
-        return self.load_messages()
+        if self.selected_conversation_id:
+            return self.load_messages()
+        # Primer mensaje del chat nuevo (§7.2.1): la conversación ya existe.
+        conversation_id = body.get("conversation_id")
+        if isinstance(conversation_id, str) and conversation_id:
+            self.selected_conversation_id = conversation_id
+            self.selected_recipient_id = ""
+        return [self.load_conversations(), self.load_messages()]
 
     @rx.event
-    def set_search_query(self, value: str) -> None:
+    def set_search_query(self, value: str) -> rx.event.EventSpec | None:
+        """Filtra los chats en local y busca personas por alias (§6.1, Q112)."""
         self.search_query = value
+        query = value.strip()
+        if len(query) < 2:
+            self.user_results = []
+            self.is_searching_users = False
+            return None
+        self.is_searching_users = True
+        return rx.call_script(
+            fetch_script(f"/api/users/search?q={quote(query, safe='')}"),
+            callback=ConversationState.handle_users_result,
+        )
+
+    @rx.event
+    def handle_users_result(self, result: Any) -> list[rx.event.EventSpec] | rx.event.EventSpec:
+        status, body, _ = parse_response(result)
+        self.is_searching_users = False
+        if status != 200:
+            if status == 401:
+                return rx.redirect("/login")
+            self.user_results = []
+            return []
+        results = body.get("results")
+        if not isinstance(results, list):
+            self.user_results = []
+            return []
+        parsed: list[UserItem] = []
+        for item in results:
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            display_name = str(item.get("display_name") or item.get("alias") or "Usuario")
+            parsed.append(
+                UserItem(
+                    id=str(item["id"]),
+                    alias=str(item.get("alias") or ""),
+                    display_name=display_name,
+                    initials=self._initials_from_name(display_name),
+                    avatar_url=str(item.get("avatar_url") or ""),
+                )
+            )
+        self.user_results = parsed
+        return []
+
+    @rx.event
+    def select_user(
+        self, user_id: str, alias: str, display_name: str, avatar_url: str
+    ) -> rx.event.EventSpec | list:
+        """Abre el chat privado existente o la vista previa temporal (§7.2, Q20)."""
+        if not user_id:
+            return []
+        self.search_query = ""
+        self.user_results = []
+        self.selected_conversation_id = ""
+        self.selected_conversation_name = ""
+        self.selected_conversation_initials = "CH"
+        self.selected_conversation_avatar_url = ""
+        self.selected_conversation_members_count = 0
+        self.selected_recipient_id = user_id
+        self.selected_recipient_alias = alias
+        self.selected_recipient_name = display_name
+        self.selected_recipient_initials = self._initials_from_name(display_name)
+        self.selected_recipient_avatar_url = avatar_url
+        self.messages = []
+        self.messages_error = ""
+        self.cursor_created_at = ""
+        self.cursor_id = ""
+        self.cancel_reply()
+        self.pending_message = ""
+        return rx.call_script(
+            fetch_script(
+                "/api/conversations/direct",
+                method="POST",
+                payload={"recipient_id": user_id},
+                request_id=user_id,
+            ),
+            callback=ConversationState.handle_select_user_result,
+        )
+
+    @rx.event
+    def handle_select_user_result(
+        self, result: Any
+    ) -> list[rx.event.EventSpec] | rx.event.EventSpec:
+        """Reutiliza la conversación existente o queda en modo temporal."""
+        status, body, request_id = parse_response(result)
+        if request_id != self.selected_recipient_id:
+            return []
+        if status != 200:
+            self.messages_error = self._error_message(body, status)
+            if status == 401:
+                return rx.redirect("/login")
+            return []
+        conversation_id = body.get("conversation_id")
+        if not isinstance(conversation_id, str) or not conversation_id:
+            # Chat temporal (Q146): la conversación nace con el primer mensaje.
+            return []
+        self.selected_conversation_id = conversation_id
+        conversation = body.get("conversation")
+        if isinstance(conversation, dict):
+            self.selected_conversation_name = str(
+                conversation.get("name") or self.selected_recipient_name
+            )
+            self.selected_conversation_initials = str(
+                conversation.get("initials") or self.selected_recipient_initials
+            )
+            avatar = conversation.get("avatar_url")
+            self.selected_conversation_avatar_url = avatar if isinstance(avatar, str) else ""
+            self.selected_conversation_members_count = self._int_value(
+                conversation.get("members_count")
+            )
+        else:
+            self.selected_conversation_name = self.selected_recipient_name
+            self.selected_conversation_initials = self.selected_recipient_initials
+            self.selected_conversation_avatar_url = self.selected_recipient_avatar_url
+        self.selected_recipient_id = ""
+        return [self.load_messages(), self.load_conversations()]
 
     @rx.event
     def set_message_draft(self, value: str) -> None:
@@ -471,6 +633,16 @@ class ConversationState(rx.State):
             fetch_script(path, request_id=conversation.id),
             callback=ConversationState.handle_messages_result,
         )
+
+    @staticmethod
+    def _initials_from_name(name: str) -> str:
+        """Iniciales para el avatar de un resultado de búsqueda."""
+        words = name.split()
+        if not words:
+            return "CH"
+        if len(words) == 1:
+            return words[0][:2].upper()
+        return (words[0][0] + words[1][0]).upper()
 
     @staticmethod
     def _error_message(body: dict[str, Any], status: int) -> str:
