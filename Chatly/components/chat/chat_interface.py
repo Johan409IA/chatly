@@ -10,6 +10,129 @@ from Chatly.state.conversation_state import (
 )
 from Chatly.state.session_state import SessionState
 
+# Red de nodos del panel central: decorativa, puramente visual.
+_NETWORK_NODES: tuple[tuple[int, int, float, str], ...] = (
+    (52, 100, 3, "soft"),
+    (134, 62, 2.4, "bright"),
+    (214, 140, 4.2, "hot"),
+    (296, 74, 2.6, "cyan"),
+    (372, 168, 3.2, "bright"),
+    (452, 96, 2.4, "soft"),
+    (530, 186, 4.4, "hot"),
+    (612, 112, 2.6, "cyan"),
+    (666, 232, 3.2, "bright"),
+    (566, 292, 2.4, "soft"),
+    (462, 250, 3.2, "bright"),
+    (374, 330, 4.2, "hot"),
+    (286, 262, 2.6, "cyan"),
+    (178, 316, 3.2, "bright"),
+    (92, 384, 4.2, "hot"),
+    (54, 500, 2.6, "cyan"),
+    (150, 448, 3.2, "bright"),
+    (230, 388, 2.4, "soft"),
+    (312, 462, 4, "bright"),
+    (408, 410, 3, "cyan"),
+    (500, 478, 2.4, "soft"),
+    (588, 404, 4.2, "hot"),
+    (656, 500, 3, "cyan"),
+    (546, 584, 2.6, "soft"),
+    (438, 566, 3.2, "bright"),
+    (338, 640, 4, "hot"),
+    (232, 566, 2.6, "cyan"),
+    (124, 652, 3.2, "bright"),
+    (62, 720, 2.4, "soft"),
+    (280, 704, 2.6, "cyan"),
+    (404, 702, 3, "bright"),
+    (620, 680, 2.6, "soft"),
+)
+
+_NETWORK_EDGES: tuple[tuple[int, int], ...] = (
+    (0, 1),
+    (1, 2),
+    (2, 3),
+    (3, 4),
+    (4, 5),
+    (5, 6),
+    (6, 7),
+    (7, 8),
+    (8, 9),
+    (9, 10),
+    (10, 11),
+    (11, 12),
+    (12, 13),
+    (13, 14),
+    (14, 15),
+    (15, 16),
+    (16, 17),
+    (17, 18),
+    (18, 19),
+    (19, 20),
+    (20, 21),
+    (21, 22),
+    (22, 23),
+    (23, 24),
+    (24, 25),
+    (25, 26),
+    (26, 27),
+    (27, 28),
+    (2, 12),
+    (4, 10),
+    (6, 8),
+    (9, 21),
+    (13, 17),
+    (16, 18),
+    (19, 24),
+    (20, 23),
+    (21, 25),
+    (24, 30),
+    (26, 29),
+    (29, 30),
+    (30, 25),
+    (27, 26),
+    (1, 13),
+    (3, 11),
+    (7, 10),
+    (10, 18),
+    (12, 19),
+    (14, 16),
+    (17, 23),
+    (22, 30),
+    (23, 31),
+    (31, 22),
+)
+
+_NETWORK_STREAKS: tuple[tuple[int, int], ...] = ((2, 1), (6, 8), (19, 24))
+
+
+def _network_segment(pair: tuple[int, int]) -> str:
+    start = _NETWORK_NODES[pair[0]]
+    end = _NETWORK_NODES[pair[1]]
+    return f'<line x1="{start[0]}" y1="{start[1]}" x2="{end[0]}" y2="{end[1]}"></line>'
+
+
+def _network_svg() -> str:
+    edges = "".join(_network_segment(pair) for pair in _NETWORK_EDGES)
+    streaks = "".join(_network_segment(pair) for pair in _NETWORK_STREAKS)
+    nodes = "".join(
+        f'<circle class="chatly-chat__net-node chatly-chat__net-node--{tone}" '
+        f'cx="{x}" cy="{y}" r="{radius}" '
+        f'style="animation-delay:{index * 0.43:.2f}s"></circle>'
+        for index, (x, y, radius, tone) in enumerate(_NETWORK_NODES)
+    )
+    return (
+        '<svg class="chatly-chat__network" viewBox="0 0 700 780" '
+        'preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">'
+        f'<g class="chatly-chat__net-edges">{edges}</g>'
+        f'<g class="chatly-chat__net-streaks">{streaks}</g>'
+        f'<g class="chatly-chat__net-nodes">{nodes}</g>'
+        "</svg>"
+    )
+
+
+def _network_backdrop() -> rx.Component:
+    """Fondo de constelación detrás del historial (solo decorativo)."""
+    return rx.box(rx.html(_network_svg()), class_name="chatly-chat__network-layer")
+
 
 def _navigation_item(icon: str, label: str, active: bool = False, href: str = "") -> rx.Component:
     content = rx.vstack(
@@ -764,6 +887,7 @@ def chat_interface() -> rx.Component:
         _navigation_rail(),
         _conversation_list(),
         rx.box(
+            _network_backdrop(),
             rx.cond(
                 ConversationState.has_selected_chat,
                 _active_conversation(),
