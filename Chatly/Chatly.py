@@ -10,7 +10,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from Chatly.backend.api.routes.auth import router as auth_router
-from Chatly.backend.api.routes.chat import router as chat_router
 from Chatly.backend.api.routes.health import router as health_router
 from Chatly.backend.api.routes.interests import router as interests_router
 from Chatly.backend.api.routes.profile import router as profile_router
@@ -30,7 +29,9 @@ from Chatly.pages.auth.login import login_page
 from Chatly.pages.auth.register import register_page
 from Chatly.pages.auth.reset_password import reset_password_page
 from Chatly.pages.auth.verify_pending import verify_pending_page
+from Chatly.pages.conversations.page import conversations_page
 from Chatly.state.auth_state import AuthState
+from Chatly.state.conversation_state import ConversationState
 from Chatly.state.session_state import SessionState
 
 # El logging JSON se configura antes de crear la app;
@@ -38,6 +39,8 @@ from Chatly.state.session_state import SessionState
 configure_logging(get_settings().log_level)
 
 logger = logging.getLogger(__name__)
+
+APP_ICON = "/icons/chatly_mark.png"
 
 
 @asynccontextmanager
@@ -66,19 +69,8 @@ class State(rx.State):
 
 
 def index() -> rx.Component:
-    """Pantalla de bienvenida tras iniciar sesión (protegida por guarda)."""
-    return rx.center(
-        rx.vstack(
-            rx.badge("Chatly", variant="solid", color_scheme="blue", size="2"),
-            rx.heading("Bienvenido a Chatly", size="8", weight="bold", text_align="center"),
-            spacing="4",
-            align="center",
-        ),
-        width="100%",
-        min_height="100vh",
-        padding="1.5rem",
-        background="radial-gradient(120% 120% at 50% 0%, var(--accent-2), var(--gray-1))",
-    )
+    """Bandeja de conversaciones protegida."""
+    return conversations_page()
 
 
 api_app = FastAPI(
@@ -99,25 +91,46 @@ api_app.add_middleware(
 )
 api_app.include_router(health_router)
 api_app.include_router(auth_router)
-api_app.include_router(chat_router)
 api_app.include_router(interests_router)
 api_app.include_router(profile_router)
 api_app.add_exception_handler(DomainError, domain_error_handler)
 api_app.add_exception_handler(RequestValidationError, validation_exception_handler)
 api_app.add_exception_handler(Exception, unhandled_exception_handler)
 
-app = rx.App(api_transformer=api_app, stylesheets=["auth.css"])
+app = rx.App(api_transformer=api_app, stylesheets=["auth.css", "chat.css"])
 # Página protegida: sin sesión válida, la guarda redirige a /login.
-app.add_page(index, on_load=[SessionState.guard_page])
+app.add_page(
+    index,
+    title="Conversaciones | Chatly",
+    image=APP_ICON,
+    on_load=[
+        SessionState.guard_page,
+        ConversationState.load_profile,
+        ConversationState.load_conversations,
+    ],
+)
+app.add_page(
+    conversations_page,
+    route="/conversations",
+    title="Conversaciones | Chatly",
+    image=APP_ICON,
+    on_load=[
+        SessionState.guard_page,
+        ConversationState.load_profile,
+        ConversationState.load_conversations,
+    ],
+)
 # Pantallas de autenticación (públicas; login redirige si ya hay sesión).
 app.add_page(
     login_page,
     route="/login",
+    image=APP_ICON,
     on_load=[SessionState.redirect_if_authenticated, AuthState.clear_messages],
 )
 app.add_page(
     register_page,
     route="/register",
+    image=APP_ICON,
     on_load=[
         SessionState.redirect_if_authenticated,
         AuthState.reset_register,
@@ -125,12 +138,21 @@ app.add_page(
     ],
 )
 app.add_page(
-    verify_pending_page, route="/verify-pending", on_load=[SessionState.redirect_if_authenticated]
+    verify_pending_page,
+    route="/verify-pending",
+    image=APP_ICON,
+    on_load=[SessionState.redirect_if_authenticated],
 )
 app.add_page(
     forgot_password_page,
     route="/forgot-password",
+    image=APP_ICON,
     on_load=[SessionState.redirect_if_authenticated],
 )
-app.add_page(reset_password_page, route="/reset-password")
-app.add_page(confirm_page, route="/auth/confirm", on_load=[AuthState.handle_confirm])
+app.add_page(reset_password_page, route="/reset-password", image=APP_ICON)
+app.add_page(
+    confirm_page,
+    route="/auth/confirm",
+    image=APP_ICON,
+    on_load=[AuthState.handle_confirm],
+)

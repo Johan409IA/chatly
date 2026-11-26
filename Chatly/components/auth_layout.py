@@ -113,11 +113,15 @@ def network_graph() -> rx.Component:
 
 
 def brand_panel() -> rx.Component:
-    """Panel izquierdo: red de nodos y logotipo «CHATLY»."""
+    """Panel izquierdo: red de nodos y marca «R»."""
     return rx.box(
         network_graph(),
         rx.box(
-            rx.text("Chatly", class_name="chatly-auth__wordmark"),
+            rx.image(
+                src="/icons/chatly_mark.png",
+                alt="R",
+                class_name="chatly-auth__logo",
+            ),
             class_name="chatly-auth__wordmark-wrap",
         ),
         class_name="chatly-auth__brand",
