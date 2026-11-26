@@ -38,6 +38,8 @@ class MessageItem:
     created_at: str
     message_type: str
     deleted: bool
+    reply_alias: str = ""
+    reply_preview: str = ""
 
 
 class ConversationState(rx.State):
@@ -60,8 +62,20 @@ class ConversationState(rx.State):
     messages_error: str = ""
     is_loading_conversations: bool = False
     is_loading_messages: bool = False
+    is_loading_older: bool = False
     is_sending: bool = False
     total_unread: int = 0
+    # Cursor de paginación hacia atrás (§8.1): (creado_en, id) del mensaje
+    # más antiguo cargado; vacío cuando no hay más páginas.
+    cursor_created_at: str = ""
+    cursor_id: str = ""
+    # Respuesta en curso (Q75): se muestra como chip sobre el compositor.
+    reply_to_id: str = ""
+    reply_to_alias: str = ""
+    reply_to_preview: str = ""
+    # Envío optimista: el texto se muestra con reloj mientras el servidor
+    # responde; al confirmar se recarga el historial y aparece con ✓.
+    pending_message: str = ""
 
     @rx.var
     def filtered_conversations(self) -> list[ConversationItem]:
@@ -78,6 +92,10 @@ class ConversationState(rx.State):
     @rx.var
     def has_filtered_conversations(self) -> bool:
         return bool(self.filtered_conversations)
+
+    @rx.var
+    def has_older_messages(self) -> bool:
+        return self.cursor_id != ""
 
     @rx.var
     def can_send_message(self) -> bool:
@@ -214,6 +232,10 @@ class ConversationState(rx.State):
         self.selected_conversation_members_count = 0
         self.messages = []
         self.messages_error = ""
+        self.cursor_created_at = ""
+        self.cursor_id = ""
+        self.cancel_reply()
+        self.pending_message = ""
 
     @rx.event
     def load_messages(self) -> rx.event.EventSpec | list:
@@ -222,6 +244,8 @@ class ConversationState(rx.State):
             return []
         self.is_loading_messages = True
         self.messages_error = ""
+        self.cursor_created_at = ""
+        self.cursor_id = ""
         path = (
             f"/api/conversations/{quote(self.selected_conversation_id, safe='')}/messages?limit=50"
         )
@@ -229,6 +253,44 @@ class ConversationState(rx.State):
             fetch_script(path, request_id=self.selected_conversation_id),
             callback=ConversationState.handle_messages_result,
         )
+
+    @rx.event
+    def load_older_messages(self) -> rx.event.EventSpec | list:
+        """Carga la página anterior con el cursor (§8.1, Q94)."""
+        if not self.selected_conversation_id or not self.cursor_id:
+            return []
+        self.is_loading_older = True
+        self.messages_error = ""
+        path = (
+            f"/api/conversations/{quote(self.selected_conversation_id, safe='')}/messages"
+            f"?before_created_at={quote(self.cursor_created_at, safe='')}"
+            f"&before_id={quote(self.cursor_id, safe='')}"
+        )
+        return rx.call_script(
+            fetch_script(path, request_id=self.selected_conversation_id),
+            callback=ConversationState.handle_older_result,
+        )
+
+    @rx.event
+    def handle_older_result(self, result: Any) -> list[rx.event.EventSpec] | rx.event.EventSpec:
+        """Antepone la página anterior al historial ya cargado."""
+        status, body, request_id = parse_response(result)
+        if request_id != self.selected_conversation_id:
+            return []
+        self.is_loading_older = False
+        if status != 200:
+            self.messages_error = self._error_message(body, status)
+            if status == 401:
+                return rx.redirect("/login")
+            return []
+        older, next_created_at, next_id = self._parse_message_page(body)
+        if older is None:
+            return []
+        # La página anterior llega ordenada ascendente y va delante de todo.
+        self.messages = older + self.messages
+        self.cursor_created_at = next_created_at
+        self.cursor_id = next_id
+        return []
 
     @rx.event
     def handle_messages_result(self, result: Any) -> list[rx.event.EventSpec] | rx.event.EventSpec:
@@ -242,20 +304,32 @@ class ConversationState(rx.State):
                 return rx.redirect("/login")
             return []
 
-        items = body.get("items")
-        if not isinstance(items, list):
+        parsed, next_created_at, next_id = self._parse_message_page(body)
+        if parsed is None:
             self.messages_error = "El servidor devolvió un historial de mensajes no válido."
             return []
+        self.messages = parsed
+        self.cursor_created_at = next_created_at
+        self.cursor_id = next_id
+        return []
 
+    @staticmethod
+    def _parse_message_page(body: dict[str, Any]) -> tuple[list[MessageItem] | None, str, str]:
+        """Convierte la respuesta §8.1 en items y el cursor de la página.
+
+        Devuelve `(items, cursor_created_at, cursor_id)`; los items vacíos
+        con `None` indican una respuesta malformada.
+        """
+        items = body.get("items")
+        if not isinstance(items, list):
+            return None, "", ""
         parsed: list[MessageItem] = []
         for item in items:
             if not isinstance(item, dict) or not item.get("id"):
-                self.messages_error = "El servidor devolvió un mensaje no válido."
-                return []
+                return None, "", ""
             author = item.get("author")
             if author is not None and not isinstance(author, dict):
-                self.messages_error = "El servidor devolvió un autor no válido."
-                return []
+                return None, "", ""
             poll = item.get("poll")
             content = item.get("content")
             if item.get("deleted"):
@@ -270,19 +344,48 @@ class ConversationState(rx.State):
                 )
             else:
                 display_content = str(content or "")
+            reply = item.get("reply_to")
+            reply_alias = ""
+            reply_preview = ""
+            if isinstance(reply, dict):
+                reply_alias = str(reply.get("author_alias") or "")
+                raw_preview = str(reply.get("preview") or "")
+                if item.get("deleted"):
+                    reply_preview = "Se eliminó un mensaje"
+                else:
+                    reply_preview = raw_preview
             parsed.append(
                 MessageItem(
                     id=str(item["id"]),
                     author_id=str(author.get("id") or "") if author else "",
                     author_alias=str(author.get("alias") or "") if author else "",
                     content=display_content,
-                    created_at=self._format_time(str(item.get("created_at") or "")),
+                    created_at=ConversationState._format_time(str(item.get("created_at") or "")),
                     message_type=str(item.get("type") or "text"),
                     deleted=bool(item.get("deleted")),
+                    reply_alias=reply_alias,
+                    reply_preview=reply_preview,
                 )
             )
-        self.messages = parsed
-        return []
+        cursor = body.get("next_cursor")
+        if isinstance(cursor, dict) and cursor.get("id"):
+            return parsed, str(cursor.get("created_at") or ""), str(cursor["id"])
+        return parsed, "", ""
+
+    @rx.event
+    def start_reply(self, message_id: str, alias: str, content: str) -> None:
+        """Fija la respuesta en curso (Q75) para el chip del compositor."""
+        self.reply_to_id = message_id
+        self.reply_to_alias = alias
+        preview = " ".join(content.split())
+        self.reply_to_preview = preview[:80]
+
+    @rx.event
+    def cancel_reply(self) -> None:
+        """Quita la respuesta en curso."""
+        self.reply_to_id = ""
+        self.reply_to_alias = ""
+        self.reply_to_preview = ""
 
     @rx.event
     def send_message(self, _form_data: dict | None = None) -> rx.event.EventSpec | list:
@@ -300,16 +403,20 @@ class ConversationState(rx.State):
 
         self.is_sending = True
         self.messages_error = ""
+        # Envío optimista: burbuja propia con reloj hasta la confirmación.
+        self.pending_message = content
+        payload: dict[str, Any] = {
+            "content": content,
+            "client_message_id": "__GENERATE_UUID__",
+        }
+        if self.reply_to_id:
+            payload["reply_to_message_id"] = self.reply_to_id
         path = f"/api/conversations/{quote(self.selected_conversation_id, safe='')}/messages"
         return rx.call_script(
             fetch_script(
                 path,
                 method="POST",
-                payload={
-                    "content": content,
-                    "client_message_id": "__GENERATE_UUID__",
-                    "reply_to_message_id": None,
-                },
+                payload=payload,
                 request_id=self.selected_conversation_id,
             ).replace(
                 json.dumps("__GENERATE_UUID__"),
@@ -324,6 +431,7 @@ class ConversationState(rx.State):
         if request_id != self.selected_conversation_id:
             return []
         self.is_sending = False
+        self.pending_message = ""
         if status not in (200, 201):
             self.messages_error = self._error_message(body, status)
             if status == 401:
@@ -334,6 +442,7 @@ class ConversationState(rx.State):
             self.messages_error = "El servidor no confirmó el mensaje enviado."
             return []
         self.message_draft = ""
+        self.cancel_reply()
         return self.load_messages()
 
     @rx.event
@@ -352,6 +461,10 @@ class ConversationState(rx.State):
         self.selected_conversation_members_count = conversation.members_count
         self.messages = []
         self.messages_error = ""
+        self.cursor_created_at = ""
+        self.cursor_id = ""
+        self.cancel_reply()
+        self.pending_message = ""
         self.is_loading_messages = True
         path = f"/api/conversations/{quote(conversation.id, safe='')}/messages?limit=50"
         return rx.call_script(

@@ -22,6 +22,10 @@ from Chatly.backend.repositories.conversation_repository import (
     ConversationRepository,
     get_conversation_repository,
 )
+from Chatly.backend.repositories.message_repository import (
+    MessageRepository,
+    get_message_repository,
+)
 from Chatly.backend.repositories.profile_repository import (
     ProfileRepository,
     get_profile_repository,
@@ -90,3 +94,11 @@ def get_conversation_repository_dep() -> ConversationRepository:
 ConversationRepositoryDep = Annotated[
     ConversationRepository, Depends(get_conversation_repository_dep)
 ]
+
+
+def get_message_repository_dep() -> MessageRepository:
+    """Dependencia FastAPI: repositorio de mensajes (sustituible en pruebas)."""
+    return get_message_repository()
+
+
+MessageRepositoryDep = Annotated[MessageRepository, Depends(get_message_repository_dep)]

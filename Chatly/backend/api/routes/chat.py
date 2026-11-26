@@ -1,18 +1,23 @@
-"""Endpoints de conversaciones y grupos (`docs/api-contracts.md` §7).
+"""Endpoints de conversaciones, grupos y mensajes (`docs/api-contracts.md` §7–§8).
 
-Las reglas de negocio viven en `ConversationRepository` (patrón de
-`profile_repository.py`): todo se ejecuta dentro de `actor_transaction` con
-RLS. Todos los endpoints exigen `VerifiedActor`: un usuario sin confirmar
-no entra al chat (criterio de la Iteración 2).
+Las reglas de negocio viven en `ConversationRepository` y `MessageRepository`
+(patrón de `profile_repository.py`): todo se ejecuta dentro de
+`actor_transaction` con RLS. Todos los endpoints exigen `VerifiedActor`: un
+usuario sin confirmar no entra al chat (criterio de la Iteración 2).
 
-Mensajes (§7.2.1 y §8) llegan en la Iteración 4 y lecturas (§7.10) en la 5.
+Lecturas (§7.10) llegan en la Iteración 5.
 """
 
-from uuid import UUID
+from datetime import datetime
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Query, Response
 
-from Chatly.backend.api.deps import ConversationRepositoryDep, VerifiedActor
+from Chatly.backend.api.deps import (
+    ConversationRepositoryDep,
+    MessageRepositoryDep,
+    VerifiedActor,
+)
 from Chatly.backend.schemas.chat import (
     AddMemberBody,
     ConversationDetail,
@@ -20,11 +25,16 @@ from Chatly.backend.schemas.chat import (
     CreateGroupBody,
     DirectConversationBody,
     DirectConversationResponse,
+    DirectMessageBody,
+    DirectMessageResponse,
     LeaveBody,
     LeaveResponse,
     MembershipCreated,
+    MessageList,
     PreferencesBody,
     RenameGroupBody,
+    SendMessageBody,
+    SendMessageResponse,
 )
 
 router = APIRouter(tags=["chat"])
@@ -131,3 +141,71 @@ async def set_preferences(
     """Oculta o muestra la conversación para el actor (§7.9)."""
     await repository.set_hidden(str(actor.id), str(conversation_id), body.hidden)
     return {"hidden": body.hidden}
+
+
+# ----------------------------------------------------------------------
+# Mensajes (§7.2.1 y §8)
+# ----------------------------------------------------------------------
+
+
+@router.get("/api/conversations/{conversation_id}/messages", response_model=MessageList)
+async def list_messages(
+    actor: VerifiedActor,
+    conversation_id: UUID,
+    repository: MessageRepositoryDep,
+    before_created_at: datetime | None = None,
+    before_id: UUID | None = None,
+    limit: int | None = Query(default=None, ge=1, le=50),
+) -> MessageList:
+    """Historial ascendente con paginación por cursor (§8.1, Q94)."""
+    return await repository.list_messages(
+        str(actor.id),
+        str(conversation_id),
+        before_created_at=before_created_at,
+        before_id=before_id,
+        limit=limit,
+    )
+
+
+@router.post("/api/conversations/{conversation_id}/messages", response_model=SendMessageResponse)
+async def send_message(
+    actor: VerifiedActor,
+    conversation_id: UUID,
+    body: SendMessageBody,
+    repository: MessageRepositoryDep,
+    response: Response,
+) -> SendMessageResponse:
+    """Envía un mensaje de texto con idempotencia (§8.2, Q40).
+
+    `201` cuando se crea; `200` si `client_message_id` ya existía.
+    """
+    client_message_id = body.client_message_id or uuid4()
+    result = await repository.send_message(
+        str(actor.id),
+        str(conversation_id),
+        body.content,
+        client_message_id,
+        body.reply_to_message_id,
+    )
+    response.status_code = 200 if result.idempotent_replay else 201
+    return SendMessageResponse(message=result.message, idempotent_replay=result.idempotent_replay)
+
+
+@router.post("/api/messages/direct", response_model=DirectMessageResponse)
+async def send_direct_message(
+    actor: VerifiedActor,
+    body: DirectMessageBody,
+    repository: MessageRepositoryDep,
+    response: Response,
+) -> DirectMessageResponse:
+    """Primer mensaje de un chat privado; crea la conversación si no existe (§7.2.1, Q146)."""
+    client_message_id = body.client_message_id or uuid4()
+    result = await repository.send_direct_message(
+        str(actor.id), str(body.recipient_id), body.content, client_message_id
+    )
+    response.status_code = 200 if not result.conversation_created else 201
+    return DirectMessageResponse(
+        message=result.message,
+        conversation_id=result.conversation_id,
+        idempotent_replay=result.idempotent_replay,
+    )
