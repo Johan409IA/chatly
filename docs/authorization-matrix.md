@@ -250,6 +250,42 @@ $$;
 
 La función evita que un usuario se autoinserte en una conversación ajena aprovechando que RLS oculta las membresías existentes. El servicio debe insertar al creador de un grupo como `admin` en la misma transacción de creación.
 
+### 3.3b Siembra de membresías del chat directo
+
+Arranque de `POST /api/messages/direct` (§7.2.1, Q146): la conversación nace sin membresías, así que la vía de administrador y la de bootstrap no cubren la membresía del destinatario. Esta función lo permite solo para la pareja registrada de un chat directo sin borrar, mientras la conversación tenga menos de dos integrantes.
+
+```sql
+create or replace function app.can_seed_direct_membership(
+    p_conversacion_id uuid,
+    p_usuario_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+    select (
+        (select app.is_verified_actor())
+        and exists (
+            select 1
+            from public.conversaciones c
+            where c.id = p_conversacion_id
+              and c.tipo = 'direct'
+              and c.eliminado_en is null
+              and (select app.current_actor_id())
+                  in (c.usuario_directo_menor, c.usuario_directo_mayor)
+              and p_usuario_id in (c.usuario_directo_menor, c.usuario_directo_mayor)
+              and (
+                  select count(*)
+                  from public.miembros_conversacion m
+                  where m.conversacion_id = c.id
+              ) < 2
+        )
+    );
+$$;
+```
+
 ### 3.4 Capacidad disponible de grupo
 
 ```sql
@@ -415,6 +451,7 @@ revoke all on function app.has_period(uuid, timestamptz) from public;
 revoke all on function app.is_active_member(uuid) from public;
 revoke all on function app.is_active_admin(uuid) from public;
 revoke all on function app.can_bootstrap_membership(uuid, uuid) from public;
+revoke all on function app.can_seed_direct_membership(uuid, uuid) from public;
 revoke all on function app.group_has_capacity(uuid) from public;
 revoke all on function app.discoverable_group_member_count(uuid) from public;
 revoke all on function app.shared_interests_for_join_request(uuid) from public;
@@ -433,6 +470,7 @@ grant execute on function app.has_period(uuid, timestamptz) to authenticated, ch
 grant execute on function app.is_active_member(uuid) to authenticated, chatly_app;
 grant execute on function app.is_active_admin(uuid) to chatly_app;
 grant execute on function app.can_bootstrap_membership(uuid, uuid) to chatly_app;
+grant execute on function app.can_seed_direct_membership(uuid, uuid) to chatly_app;
 grant execute on function app.group_has_capacity(uuid) to chatly_app;
 grant execute on function app.discoverable_group_member_count(uuid) to chatly_app;
 grant execute on function app.shared_interests_for_join_request(uuid) to chatly_app;
@@ -616,6 +654,7 @@ create policy miembros_insert_backend on public.miembros_conversacion
                 usuario_id = (select app.current_actor_id())
                 and (select app.can_bootstrap_membership(conversacion_id, usuario_id))
             )
+            or (select app.can_seed_direct_membership(conversacion_id, usuario_id))
         )
     );
 

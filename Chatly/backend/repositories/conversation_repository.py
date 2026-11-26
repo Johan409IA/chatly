@@ -19,7 +19,7 @@ Reglas de la Iteración 3 (docs/api-contracts.md §7):
 import json
 import logging
 from functools import lru_cache
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -492,17 +492,19 @@ class ConversationRepository:
             ).scalar_one()
             if found != len(others):
                 raise NotFoundError("Alguno de los integrantes no existe.")
-            conversation_id = (
-                await session.execute(
-                    text(
-                        "insert into public.conversaciones "
-                        "(tipo, nombre, creado_por, administrador_id) "
-                        "values ('group', :nombre, :actor_id, :actor_id) "
-                        "returning id"
-                    ),
-                    {"nombre": clean_name, "actor_id": actor},
-                )
-            ).scalar_one()
+            # Sin `returning id`: con RLS activa, `RETURNING` exige que la
+            # fila nueva pase la política SELECT (`has_membership`), imposible
+            # antes de insertar la membresía del creador. El `id` lo genera la
+            # aplicación (0014_rls_chat_directo).
+            conversation_id = uuid4()
+            await session.execute(
+                text(
+                    "insert into public.conversaciones "
+                    "(id, tipo, nombre, creado_por, administrador_id) "
+                    "values (:id, 'group', :nombre, :actor_id, :actor_id)"
+                ),
+                {"id": conversation_id, "nombre": clean_name, "actor_id": actor},
+            )
             try:
                 await session.execute(
                     self._INSERT_MEMBERS_SQL,
