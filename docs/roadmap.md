@@ -261,37 +261,37 @@ Se conserva el calendario base y la fecha de entrega. La funcionalidad social se
 
 ### Tareas existentes
 
-- [ ] Crear `conversaciones` con tipos `direct` y `group`.
-- [ ] Crear `miembros_conversacion` con periodos de entrada/salida, rol, actor que añadió/expulsó y estado.
-- [ ] Crear `preferencias_conversacion` para ocultar chats de forma individual.
-- [ ] Implementar restricción de una conversación privada por pareja de usuarios.
-- [ ] Implementar creación de grupos con mínimo 3 y máximo 10 integrantes.
-- [ ] Implementar administrador único y restricciones de operación.
-- [ ] Implementar incorporación directa y prevención de duplicados activos.
-- [ ] Implementar expulsión, salida y opción «Salir y eliminar».
-- [ ] Implementar sucesión automática del administrador al integrante activo con mayor antigüedad.
-- [ ] Implementar conservación de periodos históricos y reincorporación.
-- [ ] Implementar archivo definitivo cuando el último integrante sale.
-- [ ] Implementar modificación de nombre por el administrador y avatar generado.
-- [ ] Generar mensajes de sistema para creación, incorporaciones, expulsiones, salidas, cambio de admin y cambio de nombre.
-- [ ] Implementar visibilidad por periodo: antiguos integrantes solo consultan mensajes de sus periodos.
-- [ ] Crear pruebas para grupos con 3, 2 y 1 integrante, expulsión, salida, reincorporación, sucesión y ocultación.
+- [x] Crear `conversaciones` con tipos `direct` y `group`. <!-- 0003_conversaciones -->
+- [x] Crear `miembros_conversacion` con periodos de entrada/salida, rol, actor que añadió/expulsó y estado. <!-- 0003; admin único con uq_miembros_un_admin -->
+- [x] Crear `preferencias_conversacion` para ocultar chats de forma individual. <!-- 0003; PUT /api/conversations/{id}/preferences -->
+- [x] Implementar restricción de una conversación privada por pareja. <!-- uq_conversaciones_par_directo -->
+- [x] Implementar creación de grupos con mínimo 3 y máximo 10 integrantes. <!-- POST /api/conversations/groups + trigger trg_miembros_proteger_capacidad (0013) -->
+- [x] Implementar administrador único y restricciones de operación. <!-- uq_miembros_un_admin; rename/add/remove solo admin activo -->
+- [x] Implementar incorporación directa y prevención de duplicados activos. <!-- POST .../members; uq_miembros_activos -->
+- [x] Implementar expulsión, salida y opción «Salir y eliminar». <!-- DELETE .../members/{user_id}; POST .../leave con mode keep_history|hide -->
+- [x] Implementar sucesión automática del administrador al integrante activo con mayor antigüedad. <!-- leave; Q47 -->
+- [x] Implementar conservación de periodos históricos y reincorporación. <!-- periodos unido_en/salido_en; nueva fila al reincorporar -->
+- [x] Implementar archivo definitivo cuando el último integrante sale. <!-- leave marca archivada cuando no quedan activos -->
+- [x] Implementar modificación de nombre por el administrador y avatar generado. <!-- PATCH /api/conversations/{id}; avatar por iniciales -->
+- [x] Generar mensajes de sistema para creación, incorporaciones, expulsiones, salidas, cambio de admin y cambio de nombre. <!-- tipo system + evento_sistema (0004); los inserta ConversationRepository -->
+- [x] Implementar visibilidad por periodo: antiguos integrantes solo consultan mensajes de sus periodos. <!-- RLS mensajes_select_por_periodo con app.has_period (0007) -->
+- [x] Crear pruebas para grupos con 3, 2 y 1 integrante, expulsión, salida, reincorporación, sucesión y ocultación. <!-- tests/unit/test_conversation_api.py + tests/integration/test_social_schema.py; capacidad 10 completa pendiente de las cuentas demo (Iteración 9) -->
 
 ### Nuevas tareas de datos para grupos descubribles y solicitudes
 
-- [ ] Ampliar el modelo de `conversaciones` con `descripcion` y `es_descubrible` (nombres definidos en `database-schema.md`).
-- [ ] Establecer que los grupos se crean privados por defecto; solo el administrador actual puede cambiar su visibilidad.
-- [ ] Crear la relación entre grupos e intereses; cada grupo descubrible deberá tener entre 1 y 5 intereses.
-- [ ] Establecer que para activar la visibilidad descubrible el grupo debe tener descripción de 10–300 caracteres e intereses asociados.
-- [ ] Permitir al administrador modificar la descripción y los intereses del grupo mientras mantenga las validaciones acordadas.
-- [ ] Incorporar la entidad de solicitudes de unión con estados `pendiente`, `aceptada`, `rechazada` y `expirada`, fechas y referencias a solicitante/grupo/administrador que resolvió.
-- [ ] Definir y probar la regla de una sola solicitud pendiente global por usuario; impedir duplicados pendientes para el mismo usuario y grupo.
-- [ ] Implementar la caducidad automática después de 14 días sin respuesta.
-- [ ] Preparar las restricciones transaccionales para impedir superar diez integrantes cuando coincidan solicitudes aceptadas e incorporaciones directas.
-- [ ] Conservar las solicitudes históricas para trazabilidad; no crear una pantalla «Mis solicitudes».
-- [ ] Incorporar estas entidades y campos al diagrama ER y a las migraciones Alembic.
-- [ ] Reforzar en la base que `solicitudes_union` solo apunte a grupos: columna `tipo='group'` y FK compuesta `(conversacion_id, tipo)` con `uq_conversaciones_id_tipo`.
-- [ ] Aplicar `0013_descubrimiento_social` al cerrar la iteración, con RLS, grants y pruebas negativas.
+- [x] Ampliar el modelo de `conversaciones` con `descripcion` y `es_descubrible` (nombres definidos en `database-schema.md`). <!-- 0013_descubrimiento_social -->
+- [x] Establecer que los grupos se crean privados por defecto; solo el administrador actual puede cambiar su visibilidad. <!-- es_descubrible default false; endpoints de visibilidad en Iteración 8 (§16.6) -->
+- [x] Crear la relación entre grupos e intereses; cada grupo descubrible deberá tener entre 1 y 5 intereses. <!-- intereses_conversacion (0013); el límite 1–5 lo valida el servicio al publicar (Iteración 8) -->
+- [x] Establecer que para activar la visibilidad descubrible el grupo debe tener descripción de 10–300 caracteres e intereses asociados. <!-- checks ck_conversaciones_descripcion_publica (0013) -->
+- [ ] Permitir al administrador modificar la descripción y los intereses del grupo mientras mantenga las validaciones acordadas. <!-- endpoint §16.6: Iteración 8 -->
+- [x] Incorporar la entidad de solicitudes de unión con estados `pendiente`, `aceptada`, `rechazada` y `expirada`, fechas y referencias a solicitante/grupo/administrador que resolvió. <!-- solicitudes_union (0013); endpoints §16.7 en Iteración 8 -->
+- [x] Definir y probar la regla de una sola solicitud pendiente global por usuario; impedir duplicados pendientes para el mismo usuario y grupo. <!-- uq_solicitudes_union_pendiente_usuario; el añadir miembro resuelve pendientes (Q144, Q166) -->
+- [ ] Implementar la caducidad automática después de 14 días sin respuesta. <!-- vence_en e índice listos (0013); pg_cron + app.expire_pending_join_requests en 0014_social_cron (Iteración 8) -->
+- [x] Preparar las restricciones transaccionales para impedir superar diez integrantes cuando coincidan solicitudes aceptadas e incorporaciones directas. <!-- trigger de capacidad + verificación en add_member dentro de la misma transacción -->
+- [x] Conservar las solicitudes históricas para trazabilidad; no crear una pantalla «Mis solicitudes». <!-- sin estado cancelled ni historial (Q177) -->
+- [x] Incorporar estas entidades y campos al diagrama ER y a las migraciones Alembic. <!-- database-schema.md §4 (ER) y §17.4–17.5; migración 0013 -->
+- [x] Reforzar en la base que `solicitudes_union` solo apunte a grupos: columna `tipo='group'` y FK compuesta `(conversacion_id, tipo)` con `uq_conversaciones_id_tipo`. <!-- 0013; probado en test_social_schema -->
+- [x] Aplicar `0013_descubrimiento_social` al cerrar la iteración, con RLS, grants y pruebas negativas. <!-- aplicada a Supabase; downgrade/upgrade verificado; 8 pruebas de integración -->
 
 ### Entregables
 
