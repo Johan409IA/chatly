@@ -60,10 +60,7 @@ def _add_check(table: str, name: str, condition: str) -> None:
 
 def upgrade() -> None:
     # 1) Descubribilidad del grupo (§17.4).
-    op.execute(
-        "alter table public.conversaciones"
-        " add column if not exists descripcion text"
-    )
+    op.execute("alter table public.conversaciones add column if not exists descripcion text")
     op.execute(
         "alter table public.conversaciones"
         " add column if not exists es_descubrible boolean not null default false"
@@ -244,8 +241,7 @@ def upgrade() -> None:
         """
     )
     op.execute(
-        "drop trigger if exists trg_miembros_proteger_capacidad"
-        " on public.miembros_conversacion"
+        "drop trigger if exists trg_miembros_proteger_capacidad on public.miembros_conversacion"
     )
     op.execute(
         """
@@ -269,9 +265,8 @@ def upgrade() -> None:
         ("solicitudes_union", "solicitudes_union_update_backend", "update"),
     ):
         op.execute(f"drop policy if exists {policy} on public.{table}")
-        using_or_check = (
-            f"for {action} to chatly_app"
-            + (" using" if action in ("select", "delete") else " with check")
+        using_or_check = f"for {action} to chatly_app" + (
+            " using" if action in ("select", "delete") else " with check"
         )
         op.execute(
             f"""
@@ -310,8 +305,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute(
-        "drop trigger if exists trg_miembros_proteger_capacidad"
-        " on public.miembros_conversacion"
+        "drop trigger if exists trg_miembros_proteger_capacidad on public.miembros_conversacion"
     )
     op.execute("drop function if exists public.proteger_capacidad_grupo()")
     op.execute("drop function if exists app.group_has_capacity(uuid)")

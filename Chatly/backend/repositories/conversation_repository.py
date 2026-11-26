@@ -603,9 +603,12 @@ class ConversationRepository:
                     await session.execute(
                         text(
                             "update public.solicitudes_union "
-                            "set estado = 'accepted', motivo_resolucion = 'direct_add_same_group', "
-                            "resuelta_en = now(), resuelta_por = :actor_id, actualizado_en = now() "
-                            "where solicitante_id = :user_id and conversacion_id = :conversation_id "
+                            "set estado = 'accepted', "
+                            "motivo_resolucion = 'direct_add_same_group', "
+                            "resuelta_en = now(), resuelta_por = :actor_id, "
+                            "actualizado_en = now() "
+                            "where solicitante_id = :user_id "
+                            "and conversacion_id = :conversation_id "
                             "and estado = 'pending' returning id"
                         ),
                         {
@@ -668,10 +671,12 @@ class ConversationRepository:
                         await session.execute(
                             text(
                                 "update public.solicitudes_union "
-                                "set estado = 'rejected', motivo_resolucion = 'group_full', "
-                                "resuelta_en = now(), resuelta_por = :actor_id, actualizado_en = now() "
-                                "where conversacion_id = :conversation_id and estado = 'pending' "
-                                "returning id"
+                                "set estado = 'rejected', "
+                                "motivo_resolucion = 'group_full', "
+                                "resuelta_en = now(), resuelta_por = :actor_id, "
+                                "actualizado_en = now() "
+                                "where conversacion_id = :conversation_id "
+                                "and estado = 'pending' returning id"
                             ),
                             {"actor_id": actor, "conversation_id": conversation},
                         )
