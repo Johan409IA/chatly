@@ -76,7 +76,7 @@ Chatly: app web responsive de mensajería (español) con chats privados/grupales
 
 ## Reglas de dominio / trampas
 
-- Un solo backend Reflex (no segundo FastAPI). Sin Redis (una instancia). Sin CI/CD en GitHub. `bunfig.toml` usa espejo npmmirror por bloqueo de red a npmjs.org. No editar el bloque "reflex managed" de este archivo.
+- Un solo backend Reflex (no segundo FastAPI). Sin Redis (una instancia).`bunfig.toml` usa espejo npmmirror por bloqueo de red a npmjs.org. No editar el bloque "reflex managed" de este archivo.
 
 ## Forma de trabajar
 
@@ -86,6 +86,9 @@ Chatly: app web responsive de mensajería (español) con chats privados/grupales
 - Usar playwright cli para pruebas end-to-end (E2E) de la UI. No usar Selenium ni Cypress, cuando sea necesario.
 - Usa context7-cli para consultar la documentación de las tecnologías que vas a usar y tienes alguna duda, puedes usar su skill también y la de find-docs. Asi para que no tengas que consultar desde la web. Usa el comando ctx7 no el de npx.
 - Si vas a realizar commit puedes usar  el  -m " " para hacer el comentario en lugar de crear un archivo temporal.
+- Cualquier cambio que veas que no hiciste es porque yo lo hice, para que lo tengas en cuenta.
+- Usa la CLI de render para asegurarte de que el deploy de los cambios estan correctamente.
+- Puedes usar el MCP de supabase para consultar, modificar, configurar, etc si es que es necesario.
 
 ## Memoria
 
