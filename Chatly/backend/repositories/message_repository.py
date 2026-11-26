@@ -21,7 +21,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -162,12 +162,14 @@ _PAIR_CONVERSATION_SQL = text(
     """
 )
 
+# Sin `returning id`: con RLS activa, `RETURNING` exige que la fila nueva
+# pase la política SELECT (`has_membership`), imposible antes de insertar las
+# membresías. El `id` lo genera la aplicación (0014_rls_chat_directo).
 _INSERT_DIRECT_CONVERSATION_SQL = text(
     """
     insert into public.conversaciones
-        (tipo, creado_por, usuario_directo_menor, usuario_directo_mayor)
-    values ('direct', :actor_id, :menor, :mayor)
-    returning id
+        (id, tipo, creado_por, usuario_directo_menor, usuario_directo_mayor)
+    values (:id, 'direct', :actor_id, :menor, :mayor)
     """
 )
 
@@ -442,16 +444,16 @@ class MessageRepository:
             ).first()
             created = pair is None
             if created:
-                conversation_id = (
-                    await session.execute(
-                        _INSERT_DIRECT_CONVERSATION_SQL,
-                        {
-                            "actor_id": actor,
-                            "menor": min(actor, recipient),
-                            "mayor": max(actor, recipient),
-                        },
-                    )
-                ).scalar_one()
+                conversation_id = uuid4()
+                await session.execute(
+                    _INSERT_DIRECT_CONVERSATION_SQL,
+                    {
+                        "id": conversation_id,
+                        "actor_id": actor,
+                        "menor": min(actor, recipient),
+                        "mayor": max(actor, recipient),
+                    },
+                )
                 await session.execute(
                     _INSERT_MEMBERSHIP_SQL,
                     {"conversation_id": conversation_id, "user_id": actor},
