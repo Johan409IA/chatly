@@ -1,7 +1,20 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+from Chatly.backend.schemas.profile import InterestTagDTO
+
+
+# ---------- Usuario (§3.1) ----------
+class UserSummary(BaseModel):
+    """Datos básicos de un perfil: nunca incluye el correo (§3.1)."""
+
+    id: UUID
+    alias: str
+    display_name: str
+    avatar_url: str | None = None
 
 
 # ---------- Mensajes (§3.4) ----------
@@ -70,13 +83,58 @@ class ConversationSummary(BaseModel):
     is_archived: bool = False
     my_role: str
     members_count: int
-    is_discoverable: bool = False  # constante: su columna llega en 0013
-    description: str | None = None  # constante: su columna llega en 0013
+    is_discoverable: bool = False
+    description: str | None = None
 
 
 class ConversationList(BaseModel):
     items: list[ConversationSummary]
     total_unread: int = 0  # suma de no leídos, no el conteo de hilos
+
+
+# ---------- Detalle y membresías (§7.4) ----------
+class MemberItem(BaseModel):
+    """Integrante del detalle: activo o con su periodo histórico (§7.4)."""
+
+    user: UserSummary
+    role: Literal["admin", "member"]
+    joined_at: datetime
+    left_at: datetime | None = None
+    active: bool
+
+
+class MyMembership(BaseModel):
+    """La membresía del actor dentro del detalle (§7.4)."""
+
+    role: Literal["admin", "member"]
+    active: bool
+    joined_at: datetime
+
+
+class ConversationDetail(BaseModel):
+    """Detalle de conversación/grupo (§7.4): integrantes y descubribilidad."""
+
+    id: UUID
+    type: str
+    name: str | None = None
+    admin_id: UUID | None = None
+    is_archived: bool = False
+    is_discoverable: bool = False
+    description: str | None = None
+    interests: list[InterestTagDTO] = Field(default_factory=list)
+    created_at: datetime
+    members: list[MemberItem] = Field(default_factory=list)
+    my_membership: MyMembership | None = None
+
+
+class MembershipCreated(BaseModel):
+    """Respuesta de `POST /api/conversations/{id}/members` (§7.6)."""
+
+    conversation_id: UUID
+    user_id: UUID
+    role: Literal["admin", "member"]
+    joined_at: datetime
+    resolved_requests: list[str] = Field(default_factory=list)
 
 
 # ---------- Cuerpos de petición ----------
@@ -110,3 +168,57 @@ class ReadBody(BaseModel):
 class ReadResponse(BaseModel):
     last_read_message_id: UUID
     last_read_at: datetime
+
+
+# ---------- Cuerpos de conversaciones y grupos (§7.2–7.9) ----------
+class DirectConversationBody(BaseModel):
+    """Cuerpo de `POST /api/conversations/direct` (§7.2)."""
+
+    recipient_id: UUID
+
+
+class DirectConversationResponse(BaseModel):
+    """Chat existente o temporal sin persistir (§7.2, Q20, Q146)."""
+
+    conversation_id: UUID | None = None
+    is_temporary: bool = True
+    conversation: ConversationSummary | None = None
+    recipient: UserSummary
+
+
+class CreateGroupBody(BaseModel):
+    """Cuerpo de `POST /api/conversations/groups` (§7.3, Q87–Q89)."""
+
+    name: str = Field(min_length=3, max_length=40)
+    member_ids: list[UUID] = Field(default_factory=list)
+
+
+class RenameGroupBody(BaseModel):
+    """Cuerpo de `PATCH /api/conversations/{id}` (§7.5, Q87)."""
+
+    name: str = Field(min_length=3, max_length=40)
+
+
+class AddMemberBody(BaseModel):
+    """Cuerpo de `POST /api/conversations/{id}/members` (§7.6)."""
+
+    user_id: UUID
+
+
+class LeaveBody(BaseModel):
+    """Cuerpo de `POST /api/conversations/{id}/leave` (§7.8)."""
+
+    mode: Literal["keep_history", "hide"] = "keep_history"
+
+
+class LeaveResponse(BaseModel):
+    """Resultado de la salida: archivo y nuevo administrador (§7.8)."""
+
+    archived: bool
+    new_admin_id: UUID | None = None
+
+
+class PreferencesBody(BaseModel):
+    """Cuerpo de `PUT /api/conversations/{id}/preferences` (§7.9)."""
+
+    hidden: bool
