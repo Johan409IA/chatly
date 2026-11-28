@@ -11,6 +11,7 @@ a colarse una llamada a un método inexistente.
 from pathlib import Path
 
 from Chatly.state import conversation_state
+from Chatly.state.conversation_state import ConversationState
 
 _RUTA_ESTADO = Path(conversation_state.__file__)
 
@@ -37,3 +38,32 @@ def test_los_metodos_de_clase_definidos_son_los_usados() -> None:
     definidos = set(re.findall(r"def (_\w+)\(", fuente))
     indefinidos = usados - definidos
     assert indefinidos == set(), f"Métodos usados pero no definidos: {indefinidos}"
+
+
+def test_parse_message_page_lee_la_confirmacion_de_lectura() -> None:
+    """`read.all_read` (§3.4) llega como `read` del item para pintar ✓✓."""
+    cuerpo = {
+        "items": [
+            {
+                "id": "m1",
+                "type": "text",
+                "content": "Hola",
+                "created_at": "2026-11-26T18:00:00Z",
+                "author": {"id": "u1", "alias": "keller"},
+                "read": {"all_read": True, "read_count": 1, "expected_count": 1},
+            },
+            {
+                "id": "m2",
+                "type": "text",
+                "content": "Sin marca",
+                "created_at": "2026-11-26T18:01:00Z",
+                "author": {"id": "u1", "alias": "keller"},
+            },
+        ]
+    }
+
+    items, _, _ = ConversationState._parse_message_page(cuerpo)
+
+    assert items is not None
+    assert items[0].read is True
+    assert items[1].read is False

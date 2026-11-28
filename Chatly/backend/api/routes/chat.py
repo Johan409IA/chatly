@@ -5,7 +5,9 @@ Las reglas de negocio viven en `ConversationRepository` y `MessageRepository`
 `actor_transaction` con RLS. Todos los endpoints exigen `VerifiedActor`: un
 usuario sin confirmar no entra al chat (criterio de la Iteración 2).
 
-Lecturas (§7.10) llegan en la Iteración 5.
+Lecturas (§7.10) implementadas sobre `miembros_conversacion`. El indicador
+de escritura usa un puente REST efímero (`typing_registry`) hasta que la
+Iteración 6 cablee el Broadcast `typing` de Supabase Realtime.
 """
 
 from datetime import datetime
@@ -32,9 +34,12 @@ from Chatly.backend.schemas.chat import (
     MembershipCreated,
     MessageList,
     PreferencesBody,
+    ReadBody,
+    ReadResponse,
     RenameGroupBody,
     SendMessageBody,
     SendMessageResponse,
+    TypingBody,
 )
 
 router = APIRouter(tags=["chat"])
@@ -189,6 +194,39 @@ async def send_message(
     )
     response.status_code = 200 if result.idempotent_replay else 201
     return SendMessageResponse(message=result.message, idempotent_replay=result.idempotent_replay)
+
+
+@router.post("/api/conversations/{conversation_id}/read", response_model=ReadResponse)
+async def mark_read(
+    actor: VerifiedActor,
+    conversation_id: UUID,
+    body: ReadBody,
+    repository: MessageRepositoryDep,
+) -> ReadResponse:
+    """Marca la lectura del último mensaje visible (§7.10, Q60, Q101)."""
+    return await repository.mark_read(str(actor.id), str(conversation_id), body.message_id)
+
+
+@router.post("/api/conversations/{conversation_id}/typing")
+async def send_typing(
+    actor: VerifiedActor,
+    conversation_id: UUID,
+    body: TypingBody,
+    repository: MessageRepositoryDep,
+) -> dict[str, bool]:
+    """Señal efímera de escritura (puente REST hasta la Iteración 6)."""
+    await repository.record_typing(str(actor.id), str(conversation_id), is_typing=body.is_typing)
+    return {"accepted": True}
+
+
+@router.get("/api/conversations/{conversation_id}/typing")
+async def list_typing(
+    actor: VerifiedActor,
+    conversation_id: UUID,
+    repository: MessageRepositoryDep,
+) -> dict[str, list[str]]:
+    """Quiénes están escribiendo ahora (nombres visibles, sin el actor)."""
+    return {"typing": await repository.list_typing(str(actor.id), str(conversation_id))}
 
 
 @router.post("/api/messages/direct", response_model=DirectMessageResponse)

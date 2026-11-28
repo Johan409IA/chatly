@@ -23,7 +23,7 @@ from datetime import datetime
 from functools import lru_cache
 from uuid import UUID, uuid4
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.exc import IntegrityError
 
 from Chatly.backend.core.errors import (
@@ -39,8 +39,11 @@ from Chatly.backend.schemas.chat import (
     MessageAuthor,
     MessageCursor,
     MessageList,
+    ReadResponse,
+    ReadStatus,
     ReplyPreview,
 )
+from Chatly.backend.services.typing_registry import get_typing_registry
 
 logger = logging.getLogger(__name__)
 
@@ -69,17 +72,32 @@ _REPLY_FIELDS = """
 """
 
 # Historial de una conversación: el índice `ix_mensajes_conversacion_cursor`
-# cubre el filtro y el orden descendente; se invierte en Python.
+# cubre el filtro y el orden descendente; se invierte en Python. El lateral
+# calcula el `ReadStatus` (§3.4) con las reglas Q22/Q48/Q101: no cuenta el
+# emisor, solo integrantes activos presentes al enviarse el mensaje, y quien
+# sale sin leer deja de bloquear el ✓✓.
 _LIST_MESSAGES_SQL = text(
     f"""
     select m.id, m.conversacion_id, m.tipo, m.contenido, m.evento_sistema,
            m.datos_evento, m.mensaje_respuesta_id, m.editado_en,
            (m.eliminado_en is not null) as eliminado, m.creado_en,
            {_AUTHOR_FIELDS},
-           {_REPLY_FIELDS}
+           {_REPLY_FIELDS},
+           lect.esperados, lect.leidos
     from public.mensajes m
     left join public.perfiles a on a.id = m.autor_id
     {_REPLY_JOIN}
+    left join lateral (
+        select count(*) as esperados,
+               count(*) filter (
+                   where coalesce(mem.ultimo_leido_en, mem.unido_en) >= m.creado_en
+               ) as leidos
+        from public.miembros_conversacion mem
+        where mem.conversacion_id = m.conversacion_id
+          and mem.usuario_id is distinct from m.autor_id
+          and mem.unido_en <= m.creado_en
+          and mem.salido_en is null
+    ) lect on true
     where m.conversacion_id = :conversation_id
       and ((cast(:before_created_at as timestamptz) is null
             and cast(:before_id as uuid) is null)
@@ -104,6 +122,41 @@ _MEMBERSHIP_SQL = text(
     order by unido_en desc limit 1
     """
 )
+
+_MESSAGE_READ_SQL = text(
+    """
+    select id, creado_en from public.mensajes
+    where id = :message_id and conversacion_id = :conversation_id
+      and eliminado_en is null
+    """
+)
+
+# §7.10: nunca retrocede la marca (`greatest`) y solo apunta el mensaje como
+# último leído cuando de verdad avanza. `RETURNING` pasa la política SELECT
+# (`miembros_select_backend`): el actor es miembro de la conversación.
+_MARK_READ_SQL = text(
+    """
+    update public.miembros_conversacion
+       set ultimo_leido_en = greatest(coalesce(ultimo_leido_en, unido_en), :read_at),
+           ultimo_mensaje_leido_id = case
+               when :read_at >= coalesce(ultimo_leido_en, unido_en) then :message_id
+               else ultimo_mensaje_leido_id end,
+           actualizado_en = now()
+     where conversacion_id = :conversation_id
+       and usuario_id = :actor_id
+       and salido_en is null
+    returning ultimo_mensaje_leido_id, ultimo_leido_en
+    """
+)
+
+_ALIAS_SQL = text(
+    """
+    select coalesce(nombre_visible, alias) as nombre
+    from public.perfiles
+    where eliminado_en is null and id in :user_ids
+    order by nombre
+    """
+).bindparams(bindparam("user_ids", expanding=True))
 
 # Idempotencia (Q40): la clave única es (autor_id, id_mensaje_cliente).
 _FIND_BY_CLIENT_ID_SQL = text(
@@ -217,6 +270,17 @@ def _build_message(row) -> Message:
             avatar_url=row.autor_avatar,
         )
     deleted = bool(row.eliminado)
+    # El `ReadStatus` solo viene en las filas del historial (lateral de
+    # `_LIST_MESSAGES_SQL`) y solo aplica a mensajes de texto propios:
+    # los de sistema y los ajenos no llevan marca de lectura.
+    esperados = getattr(row, "esperados", None)
+    read = None
+    if author is not None and row.tipo == "text" and esperados is not None:
+        read = ReadStatus(
+            all_read=int(row.leidos) >= int(esperados),
+            read_count=int(row.leidos),
+            expected_count=int(esperados),
+        )
     return Message(
         id=row.id,
         conversation_id=row.conversacion_id,
@@ -226,6 +290,7 @@ def _build_message(row) -> Message:
         edited_at=row.editado_en,
         deleted=deleted,
         reply_to=_reply_preview(row),
+        read=read,
         system_event=row.evento_sistema,
         system_data=row.datos_evento,
         created_at=row.creado_en,
@@ -498,6 +563,117 @@ class MessageRepository:
             conversation_id=conversation_id,
             conversation_created=created,
         )
+
+    async def is_active_member(self, actor_id: str, conversation_id: str) -> bool:
+        """¿Tiene el actor una membresía activa en la conversación?"""
+        actor = UUID(actor_id)
+        conversation = UUID(conversation_id)
+        async with actor_transaction(actor) as session:
+            membership = (
+                await session.execute(
+                    _MEMBERSHIP_SQL,
+                    {"conversation_id": conversation, "actor_id": actor},
+                )
+            ).first()
+        return membership is not None and membership.salido_en is None
+
+    async def mark_read(
+        self, actor_id: str, conversation_id: str, message_id: UUID
+    ) -> ReadResponse:
+        """Marca la lectura del último mensaje visible (§7.10, Q60, Q101).
+
+        Solo avanza: `greatest` impide retroceder `ultimo_leido_en` si el
+        cliente envía un mensaje más antiguo que el ya leído. Con esto
+        `unread_count` (§7.1) baja solo y el ✓✓ del emisor aparece al
+        releer el historial.
+        """
+        actor = UUID(actor_id)
+        conversation = UUID(conversation_id)
+        async with actor_transaction(actor) as session:
+            exists = (
+                await session.execute(_CONVERSATION_EXISTS_SQL, {"conversation_id": conversation})
+            ).first()
+            if exists is None:
+                raise NotFoundError("La conversación no existe.")
+            membership = (
+                await session.execute(
+                    _MEMBERSHIP_SQL,
+                    {"conversation_id": conversation, "actor_id": actor},
+                )
+            ).first()
+            if membership is None:
+                raise NotFoundError("La conversación no existe.")
+            if membership.salido_en is not None:
+                raise ForbiddenError("Ya no perteneces a esta conversación.")
+            message = (
+                await session.execute(
+                    _MESSAGE_READ_SQL,
+                    {"message_id": message_id, "conversation_id": conversation},
+                )
+            ).first()
+            if message is None:
+                raise ValidationError("Ese mensaje no pertenece a esta conversación.")
+            row = (
+                await session.execute(
+                    _MARK_READ_SQL,
+                    {
+                        "conversation_id": conversation,
+                        "actor_id": actor,
+                        "message_id": message.id,
+                        "read_at": message.creado_en,
+                    },
+                )
+            ).first()
+        if row is None:
+            raise NotFoundError("La conversación no existe.")
+        return ReadResponse(
+            last_read_message_id=row.ultimo_mensaje_leido_id,
+            last_read_at=row.ultimo_leido_en,
+        )
+
+    async def record_typing(
+        self, actor_id: str, conversation_id: str, *, is_typing: bool
+    ) -> None:
+        """Registra la señal efímera de escritura del actor.
+
+        Puente REST hasta la Iteración 6 (Broadcast `typing` en
+        `conversation:<uuid>`): no persiste nada y la señal caduca sola.
+        """
+        actor = UUID(actor_id)
+        conversation = UUID(conversation_id)
+        async with actor_transaction(actor) as session:
+            membership = (
+                await session.execute(
+                    _MEMBERSHIP_SQL,
+                    {"conversation_id": conversation, "actor_id": actor},
+                )
+            ).first()
+            if membership is None or membership.salido_en is not None:
+                raise ForbiddenError("No perteneces a esta conversación.")
+        get_typing_registry().record_typing(
+            conversation, actor, is_typing=is_typing
+        )
+
+    async def list_typing(self, actor_id: str, conversation_id: str) -> list[str]:
+        """Nombres visibles de quienes están escribiendo (excluye al actor)."""
+        actor = UUID(actor_id)
+        conversation = UUID(conversation_id)
+        async with actor_transaction(actor) as session:
+            membership = (
+                await session.execute(
+                    _MEMBERSHIP_SQL,
+                    {"conversation_id": conversation, "actor_id": actor},
+                )
+            ).first()
+            if membership is None or membership.salido_en is not None:
+                raise ForbiddenError("No perteneces a esta conversación.")
+            user_ids = get_typing_registry().typing_members(
+                conversation, exclude_user_id=actor
+            )
+            if not user_ids:
+                return []
+            rows = (await session.execute(_ALIAS_SQL, {"user_ids": user_ids})).all()
+        return [row.nombre for row in rows]
 
     async def _load_message(self, session, message_id: UUID) -> Message:
         """Recarga el mensaje insertado con su autor y su respuesta."""
