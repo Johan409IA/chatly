@@ -172,6 +172,12 @@ class ReadResponse(BaseModel):
     last_read_at: datetime
 
 
+class TypingBody(BaseModel):
+    """Cuerpo de `POST /api/conversations/{id}/typing` (puente hasta Realtime)."""
+
+    is_typing: bool = True
+
+
 # ---------- Cuerpos de conversaciones y grupos (§7.2–7.9) ----------
 class DirectConversationBody(BaseModel):
     """Cuerpo de `POST /api/conversations/direct` (§7.2)."""

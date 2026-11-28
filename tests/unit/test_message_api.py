@@ -35,6 +35,8 @@ from Chatly.backend.schemas.chat import (
     MessageAuthor,
     MessageCursor,
     MessageList,
+    ReadResponse,
+    ReadStatus,
     ReplyPreview,
 )
 
@@ -62,7 +64,7 @@ class _StubVerifier:
         return actor
 
 
-def _mensaje(*, reply_to: ReplyPreview | None = None) -> Message:
+def _mensaje(*, reply_to: ReplyPreview | None = None, read: ReadStatus | None = None) -> Message:
     return Message(
         id=_MENSAJE_ID,
         conversation_id=_CONVERSACION_ID,
@@ -72,6 +74,7 @@ def _mensaje(*, reply_to: ReplyPreview | None = None) -> Message:
         edited_at=None,
         deleted=False,
         reply_to=reply_to,
+        read=read,
         created_at=_BASE_TIME,
     )
 
@@ -84,6 +87,9 @@ class _FakeMessageRepository:
         self.created = False
         self.last_list_kwargs: dict = {}
         self.error: DomainError | None = None
+        self.last_read_message_id: UUID | None = None
+        self.last_typing: tuple[str, str, bool] | None = None
+        self.typing_names: list[str] = []
 
     async def list_messages(
         self,
@@ -140,6 +146,26 @@ class _FakeMessageRepository:
             conversation_id=_CONVERSACION_ID,
             conversation_created=self.created,
         )
+
+    async def mark_read(
+        self, actor_id: str, conversation_id: str, message_id: UUID
+    ) -> ReadResponse:
+        if self.error is not None:
+            raise self.error
+        self.last_read_message_id = message_id
+        return ReadResponse(last_read_message_id=message_id, last_read_at=_BASE_TIME)
+
+    async def record_typing(
+        self, actor_id: str, conversation_id: str, *, is_typing: bool
+    ) -> None:
+        if self.error is not None:
+            raise self.error
+        self.last_typing = (conversation_id, actor_id, is_typing)
+
+    async def list_typing(self, actor_id: str, conversation_id: str) -> list[str]:
+        if self.error is not None:
+            raise self.error
+        return list(self.typing_names)
 
 
 class _FakeVerifiedProfiles:
@@ -434,3 +460,145 @@ def test_mensaje_eliminado_no_expone_contenido(cliente: TestClient) -> None:
     items = response.json()["items"]
     assert items[-1]["deleted"] is True
     assert items[-1]["content"] is None
+
+
+# ------------------------------------------------------- POST .../read (§7.10)
+
+
+def test_marcar_leido_responde_200_con_la_marca(cliente: TestClient) -> None:
+    response = cliente.post(
+        f"/api/conversations/{_CONVERSACION_ID}/read",
+        json={"message_id": str(_MENSAJE_ID)},
+        headers=_HEADERS,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["last_read_message_id"] == str(_MENSAJE_ID)
+    assert body["last_read_at"]
+    assert cliente.fake.last_read_message_id == _MENSAJE_ID  # type: ignore[attr-defined]
+
+
+def test_marcar_leido_sin_sesion_responde_401(cliente: TestClient) -> None:
+    response = cliente.post(
+        f"/api/conversations/{_CONVERSACION_ID}/read",
+        json={"message_id": str(_MENSAJE_ID)},
+    )
+
+    assert response.status_code == 401
+
+
+def test_marcar_leido_con_error_del_repo_propaga_el_codigo(cliente: TestClient) -> None:
+    cliente.fake.error = ValidationError(  # type: ignore[attr-defined]
+        "Ese mensaje no pertenece a esta conversación."
+    )
+    response = cliente.post(
+        f"/api/conversations/{_CONVERSACION_ID}/read",
+        json={"message_id": str(_MENSAJE_ID)},
+        headers=_HEADERS,
+    )
+
+    assert response.status_code == 422
+
+
+def test_marcar_leido_con_membresia_cerrada_responde_403(cliente: TestClient) -> None:
+    cliente.fake.error = ForbiddenError("Ya no perteneces a esta conversación.")  # type: ignore[attr-defined]
+    response = cliente.post(
+        f"/api/conversations/{_CONVERSACION_ID}/read",
+        json={"message_id": str(_MENSAJE_ID)},
+        headers=_HEADERS,
+    )
+
+    assert response.status_code == 403
+
+
+def test_historial_incluye_el_estado_de_lectura(cliente: TestClient) -> None:
+    """El DTO `read` (§3.4) llega tal cual para pintar ✓ o ✓✓."""
+    original = cliente.fake.list_messages  # type: ignore[attr-defined]
+
+    async def con_lectura(*args, **kwargs):
+        return MessageList(
+            items=[
+                _mensaje(
+                    read=ReadStatus(all_read=True, read_count=1, expected_count=1),
+                )
+            ],
+            next_cursor=None,
+        )
+
+    cliente.fake.list_messages = con_lectura  # type: ignore[attr-defined]
+    try:
+        response = cliente.get(f"/api/conversations/{_CONVERSACION_ID}/messages", headers=_HEADERS)
+    finally:
+        cliente.fake.list_messages = original  # type: ignore[attr-defined]
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["read"] == {
+        "all_read": True,
+        "read_count": 1,
+        "expected_count": 1,
+    }
+
+
+# ------------------------------------------- typing efímero (puente REST)
+
+
+def test_signal_de_escritura_responde_200(cliente: TestClient) -> None:
+    response = cliente.post(
+        f"/api/conversations/{_CONVERSACION_ID}/typing",
+        json={"is_typing": True},
+        headers=_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"accepted": True}
+    typing = cliente.fake.last_typing  # type: ignore[attr-defined]
+    assert typing == (str(_CONVERSACION_ID), str(_ACTOR_ID), True)
+
+
+def test_fin_de_escritura_llega_con_is_typing_false(cliente: TestClient) -> None:
+    response = cliente.post(
+        f"/api/conversations/{_CONVERSACION_ID}/typing",
+        json={"is_typing": False},
+        headers=_HEADERS,
+    )
+
+    assert response.status_code == 200
+    typing = cliente.fake.last_typing  # type: ignore[attr-defined]
+    assert typing == (str(_CONVERSACION_ID), str(_ACTOR_ID), False)
+
+
+def test_signal_de_escritura_sin_sesion_responde_401(cliente: TestClient) -> None:
+    response = cliente.post(
+        f"/api/conversations/{_CONVERSACION_ID}/typing",
+        json={"is_typing": True},
+    )
+
+    assert response.status_code == 401
+
+
+def test_signal_de_escritura_sin_membresia_responde_403(cliente: TestClient) -> None:
+    cliente.fake.error = ForbiddenError("No perteneces a esta conversación.")  # type: ignore[attr-defined]
+    response = cliente.post(
+        f"/api/conversations/{_CONVERSACION_ID}/typing",
+        json={"is_typing": True},
+        headers=_HEADERS,
+    )
+
+    assert response.status_code == 403
+
+
+def test_consulta_de_escritura_devuelve_los_nombres(cliente: TestClient) -> None:
+    cliente.fake.typing_names = ["Keller"]  # type: ignore[attr-defined]
+    response = cliente.get(
+        f"/api/conversations/{_CONVERSACION_ID}/typing", headers=_HEADERS
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"typing": ["Keller"]}
+
+
+def test_consulta_de_escritura_sin_sesion_responde_401(cliente: TestClient) -> None:
+    response = cliente.get(f"/api/conversations/{_CONVERSACION_ID}/typing")
+
+    assert response.status_code == 401

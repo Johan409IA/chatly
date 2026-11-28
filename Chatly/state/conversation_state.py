@@ -1,6 +1,8 @@
 """Estado de la interfaz de conversaciones, alimentado por la API de Chatly."""
 
+import asyncio
 import json
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -40,6 +42,9 @@ class MessageItem:
     deleted: bool
     reply_alias: str = ""
     reply_preview: str = ""
+    # ✓✓ (§3.4, Q101): True cuando el backend confirma que todos los
+    # integrantes elegibles ya leyeron; solo aplica a mensajes propios.
+    read: bool = False
 
 
 @dataclass(frozen=True)
@@ -97,6 +102,15 @@ class ConversationState(rx.State):
     selected_recipient_name: str = ""
     selected_recipient_initials: str = "CH"
     selected_recipient_avatar_url: str = ""
+    # Sondeo de la conversación abierta (puente REST hasta la Iteración 6):
+    # cada generación invalida los bucles anteriores al cerrar o cambiar de
+    # chat, así que nunca quedan dos sondeando la misma conversación.
+    poll_generation: int = 0
+    typing_names: list[str] = []
+    last_typing_ping: float = 0.0
+    # La carga inicial (y el envío) pegan la vista al último mensaje; el
+    # sondeo solo baja si el usuario ya estaba cerca del final.
+    force_scroll_next: bool = False
 
     @rx.var
     def filtered_conversations(self) -> list[ConversationItem]:
@@ -253,8 +267,11 @@ class ConversationState(rx.State):
         return self._select_and_load(conversation)
 
     @rx.event
-    def close_conversation(self) -> None:
+    def close_conversation(self) -> list[rx.event.EventSpec]:
         """Vuelve a la lista en pantallas pequeñas."""
+        pings = self._typing_pings(False)
+        self.poll_generation += 1
+        self.typing_names = []
         self.selected_conversation_id = ""
         self.selected_conversation_name = ""
         self.selected_conversation_initials = "CH"
@@ -271,6 +288,7 @@ class ConversationState(rx.State):
         self.selected_recipient_name = ""
         self.selected_recipient_initials = "CH"
         self.selected_recipient_avatar_url = ""
+        return pings
 
     @rx.event
     def load_messages(self) -> rx.event.EventSpec | list:
@@ -346,7 +364,10 @@ class ConversationState(rx.State):
         self.messages = parsed
         self.cursor_created_at = next_created_at
         self.cursor_id = next_id
-        return []
+        # Un solo evento por callback: la lectura encadena el scroll
+        # (handle_read_result); una lista aquí solo despacha el primero.
+        self.force_scroll_next = True
+        return self.mark_conversation_read()
 
     @staticmethod
     def _parse_message_page(body: dict[str, Any]) -> tuple[list[MessageItem] | None, str, str]:
@@ -389,6 +410,8 @@ class ConversationState(rx.State):
                     reply_preview = "Se eliminó un mensaje"
                 else:
                     reply_preview = raw_preview
+            read_info = item.get("read")
+            read = bool(isinstance(read_info, dict) and read_info.get("all_read"))
             parsed.append(
                 MessageItem(
                     id=str(item["id"]),
@@ -400,6 +423,7 @@ class ConversationState(rx.State):
                     deleted=bool(item.get("deleted")),
                     reply_alias=reply_alias,
                     reply_preview=reply_preview,
+                    read=read,
                 )
             )
         cursor = body.get("next_cursor")
@@ -486,12 +510,14 @@ class ConversationState(rx.State):
         self.cancel_reply()
         if self.selected_conversation_id:
             return self.load_messages()
-        # Primer mensaje del chat nuevo (§7.2.1): la conversación ya existe.
+        # Primer mensaje del chat nuevo (§7.2.1): la conversación ya existe
+        # y el sondeo (arrancado en `select_user`) la empieza a consultar.
         conversation_id = body.get("conversation_id")
         if isinstance(conversation_id, str) and conversation_id:
             self.selected_conversation_id = conversation_id
             self.selected_recipient_id = ""
-        return [self.load_conversations(), self.load_messages()]
+            return self.load_messages()
+        return []
 
     @rx.event
     def set_search_query(self, value: str) -> rx.event.EventSpec | None:
@@ -545,6 +571,9 @@ class ConversationState(rx.State):
         """Abre el chat privado existente o la vista previa temporal (§7.2, Q20)."""
         if not user_id:
             return []
+        pings = self._typing_pings(False)
+        self.poll_generation += 1
+        self.typing_names = []
         self.search_query = ""
         self.user_results = []
         self.selected_conversation_id = ""
@@ -563,15 +592,19 @@ class ConversationState(rx.State):
         self.cursor_id = ""
         self.cancel_reply()
         self.pending_message = ""
-        return rx.call_script(
-            fetch_script(
-                "/api/conversations/direct",
-                method="POST",
-                payload={"recipient_id": user_id},
-                request_id=user_id,
+        return [
+            *pings,
+            ConversationState.poll_conversation(),
+            rx.call_script(
+                fetch_script(
+                    "/api/conversations/direct",
+                    method="POST",
+                    payload={"recipient_id": user_id},
+                    request_id=user_id,
+                ),
+                callback=ConversationState.handle_select_user_result,
             ),
-            callback=ConversationState.handle_select_user_result,
-        )
+        ]
 
     @rx.event
     def handle_select_user_result(
@@ -609,13 +642,206 @@ class ConversationState(rx.State):
             self.selected_conversation_initials = self.selected_recipient_initials
             self.selected_conversation_avatar_url = self.selected_recipient_avatar_url
         self.selected_recipient_id = ""
-        return [self.load_messages(), self.load_conversations()]
+        # El sondeo ya está corriendo (arrancado en `select_user`); un
+        # callback devuelve un solo evento para no perder eventos.
+        return self.load_messages()
 
     @rx.event
-    def set_message_draft(self, value: str) -> None:
+    def set_message_draft(self, value: str) -> list[rx.event.EventSpec]:
         self.message_draft = value
+        return self._typing_pings(bool(value.strip()))
 
-    def _select_and_load(self, conversation: ConversationItem) -> rx.event.EventSpec:
+    # ------------------------------------------------------------------
+    # Sondeo y señales efímeras (puente REST hasta la Iteración 6)
+    # ------------------------------------------------------------------
+
+    @rx.event(background=True)
+    async def poll_conversation(self) -> None:
+        """Sondea la conversación abierta mientras haya un chat abierto.
+
+        Cada 2 s pregunta quién está escribiendo; cada 4 s refresca el
+        historial en silencio y cada 10 s la bandeja. Termina en cuanto
+        cambia la generación (chat cerrado o cambiado) o no hay chat.
+        """
+        async with self:
+            generation = self.poll_generation
+        tick = 0
+        while True:
+            await asyncio.sleep(2)
+            async with self:
+                if self.poll_generation != generation or not self.has_selected_chat:
+                    return
+                target = self.selected_conversation_id
+                tick += 1
+            if not target:
+                # Chat temporal (Q146): nada que sondear hasta el primer mensaje.
+                continue
+            base_path = f"/api/conversations/{quote(target, safe='')}"
+            yield rx.call_script(
+                fetch_script(f"{base_path}/typing", request_id=target),
+                callback=ConversationState.handle_typing_result,
+            )
+            if tick % 2 == 0:
+                yield rx.call_script(
+                    fetch_script(f"{base_path}/messages?limit=50", request_id=target),
+                    callback=ConversationState.handle_refresh_result,
+                )
+            if tick % 5 == 0:
+                yield ConversationState.refresh_conversations()
+
+    @rx.event
+    def refresh_conversations(self) -> rx.event.EventSpec:
+        """Recarga la bandeja sin estado de carga (la lanza el sondeo)."""
+        return rx.call_script(
+            fetch_script("/api/conversations"),
+            callback=ConversationState.handle_conversations_result,
+        )
+
+    @rx.event
+    def handle_typing_result(self, result: Any) -> list[rx.event.EventSpec]:
+        status, body, request_id = parse_response(result)
+        if request_id != self.selected_conversation_id:
+            return []
+        if status == 401:
+            self.poll_generation += 1
+            return [rx.redirect("/login")]
+        if status != 200:
+            self.typing_names = []
+            return []
+        typing = body.get("typing")
+        self.typing_names = (
+            [str(name) for name in typing if name] if isinstance(typing, list) else []
+        )
+        return []
+
+    @rx.event
+    def handle_refresh_result(self, result: Any) -> list[rx.event.EventSpec]:
+        """Refresco silencioso del historial lanzado por el sondeo."""
+        status, body, request_id = parse_response(result)
+        if request_id != self.selected_conversation_id:
+            return []
+        if status != 200:
+            if status == 401:
+                self.poll_generation += 1
+                return [rx.redirect("/login")]
+            return []
+        parsed, _, _ = self._parse_message_page(body)
+        if parsed is None:
+            return []
+        if len(self.messages) > len(parsed):
+            # El usuario cargó páginas anteriores: conserva el historial y
+            # solo añade los mensajes nuevos que falten al final.
+            known = {message.id for message in self.messages}
+            self.messages = [
+                *self.messages,
+                *[message for message in parsed if message.id not in known],
+            ]
+        else:
+            self.messages = parsed
+        return self.mark_conversation_read()
+
+    @rx.event
+    def mark_conversation_read(self) -> rx.event.EventSpec | list:
+        """Marca la lectura del último mensaje visible (§7.10, Q60).
+
+        Solo con la pestaña visible (`only_if_visible`) y sin conversación
+        temporal (aún no hay nada que marcar). El backend nunca retrocede
+        la marca, así que repetir la llamada es inocuo.
+        """
+        if not self.selected_conversation_id or not self.messages:
+            return []
+        return rx.call_script(
+            fetch_script(
+                f"/api/conversations/{quote(self.selected_conversation_id, safe='')}/read",
+                method="POST",
+                payload={"message_id": self.last_message_id},
+                request_id=self.selected_conversation_id,
+                only_if_visible=True,
+            ),
+            callback=ConversationState.handle_read_result,
+        )
+
+    @rx.event
+    def handle_read_result(self, result: Any) -> rx.event.EventSpec | list:
+        status, _, _ = parse_response(result)
+        if status == 401:
+            self.poll_generation += 1
+            return rx.redirect("/login")
+        # Tras marcar la lectura, la vista baja al último mensaje (o se
+        # queda si el usuario estaba leyendo arriba).
+        force = self.force_scroll_next
+        self.force_scroll_next = False
+        return self._scroll_script(force)
+
+    def _scroll_script(self, force: bool) -> rx.event.EventSpec:
+        """Pega la vista al último mensaje tras cargar o refrescar.
+
+        Con `force` (primera carga, envío) baja en cuanto haya desbordamiento,
+        reintentando hasta 4 s porque React puede pintar los mensajes después
+        del evento; en el sondeo solo baja si el usuario ya estaba cerca del
+        final, para no arrastrarle la vista mientras lee mensajes antiguos.
+        """
+        condition = "true" if force else "cerca"
+        return rx.call_script(
+            "(function(){let intentos=0;"
+            "const baja=function(){"
+            "const box=document.querySelector('.chatly-chat__messages');"
+            "if(!box){if(++intentos<40){setTimeout(baja,100);}return;}"
+            "if(box.scrollHeight<=box.clientHeight+10){"
+            "if(++intentos<40){setTimeout(baja,100);}return;}"
+            "const cerca=box.scrollHeight-box.scrollTop-box.clientHeight<120;"
+            "if(" + condition + "){box.scrollTop=box.scrollHeight;}};"
+            "baja();return 'ok';})()",
+            callback=ConversationState.handle_scroll_done,
+        )
+
+    @rx.event
+    def handle_scroll_done(self, _result: Any) -> None:
+        """El script de scroll no necesita respuesta."""
+
+    @rx.event
+    def handle_typing_ack(self, result: Any) -> list[rx.event.EventSpec]:
+        status, _, _ = parse_response(result)
+        if status == 401:
+            self.poll_generation += 1
+            return [rx.redirect("/login")]
+        return []
+
+    def _typing_pings(self, is_typing: bool) -> list[rx.event.EventSpec]:
+        """Señales de escritura con el throttle de Q96 (máximo 1 por segundo)."""
+        if not self.selected_conversation_id:
+            return []
+        now = time.monotonic()
+        if is_typing:
+            if now - self.last_typing_ping < 1.0:
+                return []
+            self.last_typing_ping = now
+            return [self._typing_call(True)]
+        if self.last_typing_ping == 0.0:
+            return []
+        self.last_typing_ping = 0.0
+        return [self._typing_call(False)]
+
+    def _typing_call(self, is_typing: bool) -> rx.event.EventSpec:
+        return rx.call_script(
+            fetch_script(
+                f"/api/conversations/{quote(self.selected_conversation_id, safe='')}/typing",
+                method="POST",
+                payload={"is_typing": is_typing},
+                request_id=self.selected_conversation_id,
+            ),
+            callback=ConversationState.handle_typing_ack,
+        )
+
+    @rx.var
+    def last_message_id(self) -> str:
+        """Id del último mensaje cargado, para marcar la lectura (§7.10)."""
+        return self.messages[-1].id if self.messages else ""
+
+    def _select_and_load(self, conversation: ConversationItem) -> rx.event.EventSpec | list:
+        pings = self._typing_pings(False)
+        self.poll_generation += 1
+        self.typing_names = []
         self.selected_conversation_id = conversation.id
         self.selected_conversation_name = conversation.name
         self.selected_conversation_initials = conversation.initials
@@ -629,10 +855,14 @@ class ConversationState(rx.State):
         self.pending_message = ""
         self.is_loading_messages = True
         path = f"/api/conversations/{quote(conversation.id, safe='')}/messages?limit=50"
-        return rx.call_script(
-            fetch_script(path, request_id=conversation.id),
-            callback=ConversationState.handle_messages_result,
-        )
+        return [
+            *pings,
+            ConversationState.poll_conversation(),
+            rx.call_script(
+                fetch_script(path, request_id=conversation.id),
+                callback=ConversationState.handle_messages_result,
+            ),
+        ]
 
     @staticmethod
     def _initials_from_name(name: str) -> str:

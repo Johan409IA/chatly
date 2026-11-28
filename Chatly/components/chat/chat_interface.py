@@ -516,7 +516,19 @@ def _message(message: MessageItem) -> rx.Component:
                     rx.text(message.created_at, class_name="chatly-chat__message-time"),
                     rx.cond(
                         is_own_message,
-                        rx.icon("check", size=13, class_name="chatly-chat__message-status"),
+                        rx.cond(
+                            message.read,
+                            rx.icon(
+                                "check_check",
+                                size=13,
+                                class_name="chatly-chat__message-status",
+                            ),
+                            rx.icon(
+                                "check",
+                                size=13,
+                                class_name="chatly-chat__message-status",
+                            ),
+                        ),
                         rx.fragment(),
                     ),
                     spacing="1",
@@ -714,11 +726,19 @@ def _active_conversation() -> rx.Component:
                 ),
                 rx.text(
                     rx.cond(
-                        ConversationState.selected_conversation_id != "",
-                        "Conversación de Chatly",
-                        "Chat nuevo: el primer mensaje inicia la conversación",
+                        ConversationState.typing_names.length() > 0,
+                        ConversationState.typing_names[0] + " está escribiendo…",
+                        rx.cond(
+                            ConversationState.selected_conversation_id != "",
+                            "Conversación de Chatly",
+                            "Chat nuevo: el primer mensaje inicia la conversación",
+                        ),
                     ),
-                    class_name="chatly-chat__active-caption",
+                    class_name=rx.cond(
+                        ConversationState.typing_names.length() > 0,
+                        "chatly-chat__active-caption chatly-chat__typing",
+                        "chatly-chat__active-caption",
+                    ),
                 ),
                 align="start",
                 spacing="0",

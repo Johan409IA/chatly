@@ -36,8 +36,14 @@ def fetch_script(
     method: str = "GET",
     payload: dict[str, object] | None = None,
     request_id: str = "",
+    only_if_visible: bool = False,
 ) -> str:
-    """Construye el script `fetch` de una llamada autenticada por cookies."""
+    """Construye el script `fetch` de una llamada autenticada por cookies.
+
+    Con `only_if_visible` la llamada se omite cuando la pestaña no está
+    visible (Q60: solo marca lectura con el chat a la vista); responde
+    `status: 0` con `body.skipped` y el callback la descarta.
+    """
     options = [
         f"method: {json.dumps(method)}",
         'headers: {"Content-Type": "application/json"}',
@@ -45,11 +51,18 @@ def fetch_script(
     ]
     if payload is not None:
         options.append(f"body: JSON.stringify({json.dumps(payload)})")
+    visibility_guard = (
+        "if (document.visibilityState !== 'visible') {"
+        "return JSON.stringify({status: 0, body: {skipped: true}, request_id: requestId});}"
+        if only_if_visible
+        else ""
+    )
     return (
         "(async () => {"
         + _API_JS.replace("@API_BASE@", _API_BASE)
         + f"const requestId = {json.dumps(request_id)};"
         + f"const path = {json.dumps(path)};"
+        + visibility_guard
         + "try {"
         + "const response = await fetch(apiBase + path, {"
         + ",".join(options)
